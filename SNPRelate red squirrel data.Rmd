@@ -1,0 +1,155 @@
+---
+title: "Red Squirrel: Data prep, LD-based SNP pruning, PCA, IBD"
+author: "Tanya Lama"
+date: "5/18/2018"
+output:
+  html_document: 
+    theme: cosmo
+  rmarkdown: github_document
+---
+
+###We will reduce our 78k SNP dataset using LD-based SNP pruning. Then we will confirm the results of our sNMF analysis using a PCA,followed by two identity by descent relatedness analyses (MoM and MLE)  
+```{r R Setup, message=FALSE, warning=FALSE, paged.print=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+library(vcfR)
+library(adegenet)
+library(adegraphics)
+library(pegas)
+library(StAMPP)
+library(lattice)
+library(gplots)
+library(ape)
+library(ggmap) 
+library(LEA)
+#The new packages we'll be using for these analyses (mainly gdsfmt and SNPRelate) need to be installed from Bioconductor Lite
+#source("https://bioconductor.org/biocLite.R", echo=FALSE, verbose = FALSE)
+#biocLite()
+#biocLite(c("GenomicFeatures", "AnnotationDbi"))
+#biocLite("SNPRelate")
+library("devtools")
+library(gdsfmt)
+library(SNPRelate)
+library(calibrate)
+```
+
+Preparing data  
+#gdsfmt package provides the genome data structure (GDS) file format for array-oriented bioinformatic data, which is a container for annotation and SNP genotypes. 
+```{r Data Prep, message=FALSE, warning=FALSE, paged.print=FALSE}
+#Clear cache if necessary using
+#closeAllConnections()
+#snpgdsClose(genofile) #in case you need to close or re-write a gds file
+#closefn.gds(test1.gds)
+
+#Load up our vcf file (SNP data for 24 red squirrels)
+vcf.fn <- "/Users/tanyalama/TMorelli_UMassachusetts_RedSquirrel_20170525-01609/VCF_files/UMA13_aligned_genotypes_stringent.vcf"
+
+#Reformat VCF --> SNP GDS (genomic data structure) Format
+snpgdsVCF2GDS(vcf.fn, "test1.gds", method="biallelic.only")
+
+#Summary
+snpgdsSummary("test1.gds")
+
+genofile <- snpgdsOpen("/Users/tanyalama/Box Sync/Squirrel/test1.gds", readonly= FALSE)
+#Add population information to your gds genofile 
+
+add.gdsn(genofile, "pop_code", c(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1)) #all identified to 1 population for starters
+
+#get sample id information
+sample.id <- read.gdsn(index.gdsn(genofile, "sample.id"))
+```
+
+Data Analysis  
+#gdsfmt and SNPRelate accelerate two key computations in GWAS (genome wide association studies): principal component analysis (PCA) and relatedness analysis using identity-by-descent (IBD) measures.  
+  
+LD-based SNP pruning  
+#It is suggested to use a pruned set of SNPs which are in approximate linkage equilibrium with each other to avoid the strong influence of SNP clusters in principal component analysis and relatedness analysis.
+```{r message=FALSE, warning=FALSE}
+set.seed(1) #should be 1000, reduced for rmarkdown
+#Try different LD thresholds for sensitivity analysis. #Need to include autosome.only = FALSE clause to run.
+
+snpset <- snpgdsLDpruning(genofile, autosome.only = FALSE,remove.monosnp = TRUE, ld.threshold=0.1, verbose = FALSE) #38,384/72,744 markers are selected in total with .1 ld.
+
+# Create an object to hold our ~38k selected SNPs
+snpset.id <- unlist(snpset)
+```
+
+Principal Component Analysis (PCA)  
+#The functions in SNPRelate for PCA include calculating the genetic covariance matrix from genotypes, computing the correlation coefficients between sample loadings and genotypes for each SNP, calculating SNP eigenvectors (loadings), and estimating the sample loadings of a new dataset from specified SNP eigenvectors.  
+```{r PCA, echo=TRUE, warning=FALSE}
+# Run PCA using the ldpruned set of 38k SNPs (snpset.id) instead of the full set. 
+#get sample id information
+genofile
+
+sample.id <- read.gdsn(index.gdsn(genofile, "sample.id")) #run
+
+pca <- snpgdsPCA(genofile, sample.id = NULL, snp.id=snpset.id, autosome.only = FALSE,  num.thread=2, verbose= TRUE)
+
+#The following code shows how to calculate the percent of variation that is accounted for by the top principal components. It is clear to see the first two eigenvectors hold the largest percentage of variance among the population, although the total variance accounted for is still less the one-quarter of the total.
+
+# variance proportion (%)
+pc.percent <- pca$varprop*100
+head(round(pc.percent, 2))
+
+#get population information
+pop_code<- read.gdsn(index.gdsn(genofile, "pop_code"))
+head(cbind(sample.id, pop_code))
+
+# make a data.frame
+tab <- data.frame(sample.id = pca$sample.id,
+    pop = factor(pop_code)[match(pca$sample.id,sample.id)],
+    EV1 = pca$eigenvect[,1],    # the first eigenvector
+    EV2 = pca$eigenvect[,2],    # the second eigenvector
+    stringsAsFactors = FALSE)
+tab #view the dataframe
+
+plot(tab$EV2, tab$EV1, xlab="eigenvector 2", ylab="eigenvector 1") #three distinct groups
+```
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=TRUE}
+#Draw
+plot.new()
+plot(tab$EV2, tab$EV1, xlim = c(-0.3, 0.7), ylim = c(-0.2, 0.57), col=as.factor(tab$sample.id), xlab="eigenvector 2", ylab="eigenvector 1")
+textxy(tab$EV2, tab$EV1, labs = pca$sample.id[1:24], cex = 0.45, pos = 4)
+legend("bottomleft", legend=as.factor(tab$sample.id), cex = 0.6,pch="o", col=as.factor(tab$sample.id))
+ 
+```
+
+Relatedness Analysis: Estimating IBD Using PLINK method of moments (MoM)  
+#For relatedness analysis, identity-by-descent (IBD) estimation in SNPRelate can be done by either the method of moments (MoM) (Purcell et al., 2007) or maximum likelihood estimation (MLE) (Milligan, 2003; Choi et al., 2009). For both of these methods it is preffered to use a LD pruned SNP set.
+```{r echo=TRUE, warning=FALSE}
+sample.id <- read.gdsn(index.gdsn(genofile, "sample.id"))
+
+# Estimate IBD coefficients
+ibd <- snpgdsIBDMoM(genofile, sample.id, snp.id=snpset.id, autosome.only = FALSE, remove.monosnp= TRUE, kinship = TRUE, maf=0.05, missing.rate=0.05, num.thread=2, verbose= TRUE)
+  #maf (minor allele frequency) threshold is the frequency   at which the second most common allele occurs in a given   population. 
+
+# Make a dataframe
+ibd.coeff <- snpgdsIBDSelection(ibd)
+head(ibd.coeff)
+```
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+plot(ibd.coeff$k0, ibd.coeff$k1, xlim=c(0,1), ylim=c(0,1),
+    xlab="k0", ylab="k1", main="red squirrel samples relatedness (MoM)")
+lines(c(0,1), c(1,0), col="red", lty=2)
+textxy(ibd.coeff$k0, ibd.coeff$k1, labs = ibd.coeff$ID2, cex = 0.45, pos = 3)
+
+#I know this isn't great to look at with the overlapping labels, but the interesting points are UMA4, UMA21, UMA42
+```
+
+Estimating IBD: Maximum Likelihood Estimation  
+#Identical by descent (IBD) describes a matching segment of DNA shared by two or more individuals that has been inherited from a common ancestor without any intervening recombination. Alleles that are IBD have been interested by a recent common ancestor (and indicate recent gene flow).
+```{r message=TRUE, warning=FALSE}
+# Estimate IBD coefficients
+set.seed(1) #should be 1000
+ibd <- snpgdsIBDMLE(genofile, sample.id = NULL, snp.id=snpset.id,autosome.only = FALSE, remove.monosnp= TRUE, maf=0.05, missing.rate=0.05, kinship = TRUE, num.thread=2, verbose = TRUE)
+
+# Make a dataframe
+ibd.coeff <- snpgdsIBDSelection(ibd)
+```
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+plot(ibd.coeff$k0, ibd.coeff$k1, xlim=c(0,1), ylim=c(0,1), col=as.factor(ibd.coeff$ID2),
+    xlab="k0", ylab="k1", main="red squirrel samples relatedness (MLE)")
+lines(c(0,1), c(1,0), col="red", lty=2)
+textxy(ibd.coeff$k0, ibd.coeff$k1, labs = ibd.coeff$ID2, cex = 0.45, pos = 3)
+legend("right", legend=as.factor(ibd.coeff$ID2), cex = 0.4,pch="o", col=as.factor(ibd.coeff$ID2)) #legend optional
+```
+
