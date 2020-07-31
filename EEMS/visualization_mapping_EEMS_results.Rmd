@@ -1,0 +1,181 @@
+---
+title: "visualization_mapping_EEMS_results.Rmd"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+We're going to start with our "basic" study area map. This includes continental and state/provincial outlines, our species distribution including US ESA designated critical habitat, our sample locations. Finally, we'll work on generating the .outer coordinates designating available habitat. This is a key requirement of EEMS (estimated effective migration surface. See our HackMD: https://hackmd.io/@tlama/EEMS for details on EEMS
+
+## Starting with our "base" map ##
+```
+# Plotting the outline of the US/Canada, provinces, and in particular the St. Lawrence River
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+library(maps)
+library(mapproj)
+library(mapdata)
+library(rgeos)
+library(maptools)
+library(sp)
+library(raster)
+library(rgdal)
+
+can0<-getData('GADM', country="CAN", level=0) # Canada
+can1<-getData('GADM', country="CAN", level=1) # provinces
+# can2<-getData('GADM', country="CAN", level=2) # counties
+spplot(can1, "NAME_1") # colors the provinces and provides
+                       # a color-coded legend for them
+can1$NAME_1            # returns names of provinces/territories
+# us0 <- getData('GADM', country="USA", level=0)
+us1 <- getData('GADM', country="USA", level=1)
+# us2 <- getData('GADM', country="USA", level=2)
+                      # state boundaries split at 
+                       # the dateline
+us1$NAME_1             # returns names of the states + DC
+#spplot(us1, "ID_1")
+#spplot(us1, "NAME_1")  # color codes states and
+                       # provides their names
+```
+# Try this script 
+#To plot multiple SpatialPolygons objects on the same device, one approach is to specify the geographic extent you wish to plot first, and then using plot(..., add=TRUE). This will add to the map only those points that are of interest.
+
+Plotting using a projection, (e.g. a polyconic projection) requires first using the spTransform() function in the rgdal package to make sure all the layers are in the same projection.
+```{r}
+##Call a new plot
+plot.new()
+## Specify a geographic extent for the map
+## by defining the top-left and bottom-right geographic coordinates
+mapExtent <- rbind(c(-74, 59), c(-60, 40))#final set: (c(-74, 59), c(-61, 40))
+#plot(mapExtent, col=NA, pch="o", add=TRUE)#trouble-shooting how bit to makethe extent
+
+## Specify the required projection using a proj4 string
+## Use http://www.spatialreference.org/ to find the required string
+## Polyconic for North America
+newProj <- CRS("+proj=poly +lat_0=0 +lon_0=-100 +x_0=0 +y_0=0 +ellps=WGS84 +datum=WGS84 +units=m +no_defs") #this should be same/similar to "+init=epsg:4326" which is what we have for the points above
+
+## Project the map extent (first need to specify that it is longlat) 
+mapExtentPr <- spTransform(SpatialPoints(mapExtent, 
+                  proj4string=CRS("+proj=longlat")),
+                  newProj)
+plot(mapExtentPr, pch=NA) #try this to make St Lawrence River
+#plot(mapExtentPr,pch="o", add=TRUE) #visualize using points the topleft and bottomright corners of the extent
+
+## Project other layers
+can0Pr <- spTransform(can0, newProj)
+can1Pr <- spTransform(can1, newProj)
+us1Pr <- spTransform(us1, newProj) 
+
+## Plot each projected layer, beginning with the projected extent
+#plot(can0Pr, border="black", col=NA, add=TRUE)
+#plot(can1Pr, border=NA, col="lightgrey", add=TRUE)
+#plot(us1Pr, border="black", col=NA, add=TRUE)
+```
+#Adding other features to the map, such as highlighting jurisdictions of interest, can easily be done using the same approach:
+```{r}
+## Highlight provinces and states of interest
+theseJurisdictions <- c("Québec", "Nova Scotia", "New Brunswick", "Newfoundland and Labrador")
+theseUSJurisdictions <- c("Maine")
+borderingJurisdictions<- c("Ontario")
+borderingUSJurisdictions<- c("New Hampshire", "Vermont", "Massachusetts", "Connecticut", "New York")
+
+p <- plot(can1Pr[can1Pr$NAME_1 %in% theseJurisdictions, ], border="black", 
+    col="gray90", add=TRUE) + 
+  plot(us1Pr[us1Pr$NAME_1 %in% theseUSJurisdictions, ], border="black", 
+    col="gray90", add=TRUE) +
+  plot(can1Pr[can1Pr$NAME_1 %in% borderingJurisdictions, ], border="black", cex=0.4, 
+    col="white", add=TRUE) +
+  plot(us1Pr[us1Pr$NAME_1 %in% borderingUSJurisdictions, ], border="black", cex=0.4, 
+    col="white", add=TRUE)
+```
+# Add a map "inlay" of the continent -- this is still a work in progress
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE}
+mapExtent2 <- rbind(c(-156, 80), c(-68, 19))#final set: (c(-74, 59), c(-61, 40)) mapExtent <- rbind(c(-156, 80), c(-68, 19))
+#plot(mapExtent2, col=NA, pch="o", add=TRUE)#trouble-shooting how bit to makethe extent
+## Project the map extent (first need to specify that it is longlat) 
+mapExtent2Pr <- spTransform(SpatialPoints(mapExtent, 
+                  proj4string=CRS("+proj=longlat")),
+                  newProj)
+plot(mapExtent2Pr, pch=NA, col="blue")
+plot(can0Pr, border="black", col=NA, add=TRUE)
+```
+
+# Next: Mapping for EEMS. 
+We need to do some complementary mapping for our EEMS (estimated effective migration surface) analysis
+There are two spatial requirements -- a .coords file that includes sample locations in WGS84 (long,lat) and a .outer file. The .outer file should include coordinates that outline available habitat for the populations included in .coords. This is easier said than done. We will try a few different ways of getting the .outer coordinates. We already have the .coords from the csv used above to map lynx_pts. 
+
+#Can we get the .outer vertices from the species distribution shapefile? 
+We have a species distribution shapefile that we downloaded from USFWS, that includes US ESA designated critical habitat and the larger species distribution in easterns Canadian provinces adjacent to Maine. Maybe we can use that shapefile to provide the vertices required for .outer. 
+```{r}
+#Read the shapefile into R
+shape <- readOGR("/Users/tanyalama/Box/project_canada_lynx_wgs/R_canada_lynx_wgs/EEMS/IUCN_redlist_Canada_lynx_spp_distribution/data_0.shp")
+coordinates(shape)<-c("x","y") #retrieve the spatial coordinates from the lynx dataset
+spdfpr<- spTransform(shape, newProj)
+proj4string(shape)<-CRS("+init=epsg:4326") #sets projection attributes on spatial data #Here we have WGS84
+#EPSG:3347	NAD83 / Statistics Canada Lambert	Lambert Conic Conformal (2SP)
+sp_dist_shapefile<-spTransform(shape, CRS("+proj=poly +lat_0=0 +lon_0=-100 +x_0=0 
+            +y_0=0 +ellps=WGS84 +datum=WGS84 +units=m +no_defs")) #transform to WGS 84
+plot(sp_dist_shapefile, add=TRUE, col="grey90")
+```
+# Add sample location points to the map, from our lynx dataset
+```{r}
+lynx<-read.csv("/Users/tanyalama/Box/project_canada_lynx_wgs/R_canada_lynx_wgs/study_area_map/WGS_locations_WGS84.csv",header=TRUE)
+spdf<-data.frame(samples=lynx$sample,y=lynx$lat,x=lynx$long, class=lynx$pop)
+coordinates(spdf)<-c("x","y") #retrieve the spatial coordinates from the lynx dataset
+spdfpr<- spTransform(spdf, newProj)
+proj4string(spdf)<-CRS("+init=epsg:4326") #sets projection attributes on spatial data #Here we have WGS84
+#EPSG:3347	NAD83 / Statistics Canada Lambert	Lambert Conic Conformal (2SP)
+lynx_pts<-spTransform(spdf, CRS("+proj=poly +lat_0=0 +lon_0=-100 +x_0=0 
+            +y_0=0 +ellps=WGS84 +datum=WGS84 +units=m +no_defs")) #transform to WGS 84
+palette(c("orange", "violet", "lightgreen", "tomato", "blueviolet")) #matches our admixture plot
+plot(lynx_pts,pch=16, col=as.factor(spdftrans$class), add=TRUE) #palette=(rainbow(5))
+```
+# Add a legend
+```{r}
+legend("bottomright", legend=c("N St. Lawrence River", "Newfoundland", "S St. Lawrence River", "Bobcat", "Bobcat-Lynx Hybrid"), pch=16, col=c("orange", "violet", "lightgreen", "tomato", "blueviolet"), text.col="black", cex = 0.6, border=FALSE, box.col=NA, inset=0.1)
+```
+That looks great. 
+Next, we need to coerce our SpatialPolygonsDataFrama (shape) into lines, then points in a data frame. 
+```{r}
+## Start here for polygons. Coerce to line
+lin <- as(shape, "SpatialLinesDataFrame")  
+## Start here for lines. Coerce to points
+pts <- as.data.frame(as(lin, "SpatialPointsDataFrame")) #this might be all we need since this is a data frame, let's see
+##select just the last two columns which have our x and y information
+print<-pts[,19:20]
+#write.csv(print, "/Users/tanyalama/Box/project_canada_lynx_wgs/R_canada_lynx_wgs/EEMS/IUCN_redlist_Canada_lynx_spp_distribution/EEMS_spp_dist_as_pts.csv")
+#I opened the .csv and reordered the columns and renamed and removed rownames (lazy) 
+```
+We now have our species distribution polygon available as points in a dataframe. We need to transform it as above and plot it to make sure it captures the outline of our original shapefile. 
+```{r}
+outer<- read.csv("/Users/tanyalama/Box/project_canada_lynx_wgs/R_canada_lynx_wgs/EEMS/IUCN_redlist_Canada_lynx_spp_distribution/EEMS_spp_dist_as_pts.csv")
+spdf<-data.frame(y=outer$lat,x=outer$long)
+coordinates(spdf)<-c("x","y") #retrieve the spatial coordinates from the lynx dataset
+spdfpr<- spTransform(spdf, newProj)
+proj4string(spdf)<-CRS("+init=epsg:4326") #sets projection attributes on spatial data #Here we have WGS84
+#EPSG:3347	NAD83 / Statistics Canada Lambert	Lambert Conic Conformal (2SP)
+sp_dist_shapefile_pts<-spTransform(spdf, CRS("+proj=poly +lat_0=0 +lon_0=-100 +x_0=0 
+            +y_0=0 +ellps=WGS84 +datum=WGS84 +units=m +no_defs")) #transform to WGS 84
+plot(sp_dist_shapefile_pts,pch=20, col="pink", add=TRUE) #palette=(rainbow(5))
+
+#maybe we can remove some of these points and limit it to our mapping extent... but the good news is that these samples match up with our points and ourmap!
+```
+While I am glad that sp_dist_shapefile_pts seemed like the right way to go, we ran into a problem because EEMS wants the .outer points listed in counterclockwise fashion with the first and last points listed matching up so as to "close" the circle. This wasn't going to be possible with the sp_dist_shapefile_pts data, because it looked like the points were in no particular order. A quick attempt to "reorganize" the points in counterclockwise order was just a huge headache and I quickly realized it wasn't going to be possible. On to the next attempt: 
+
+#Drawing the ".outer" coordinates in ArcGIS online
+We decided that it would be best to just try trading the outline of our study area in ArcGis and using those coordinates at the input for .outer in EEMS. Ultimately we tried two iterations. One which very precisely followed the outline of our study area (along the banks of the St Lawrence River and the Strait of Belle Isle). However, EEMS wasn't able to properly draw the demes given how the input habitat is disconnected on the East side. On a second iteration, we re-drew the outline with less detail and EEMS was able to use our habitat designation to proceed. 
+Here is a visualization of the "detailed" outline we drew. Let's make sure that the coordinates are in the right projection (WGS84) and that when we transform them, they line up nicely with our other data layers (individuals, the designation of critical habitat and species distribution map (grey), and our geographic outlines of Maine and eastern Canadian provinces).
+```{r}
+outer<- read.csv("/Users/tanyalama/Box/project_canada_lynx_wgs/R_canada_lynx_wgs/EEMS/IUCN_redlist_Canada_lynx_spp_distribution/EEMS_outer_arcgis_pts.csv")
+spdf<-data.frame(y=outer$lat,x=outer$long)
+coordinates(spdf)<-c("x","y") #retrieve the spatial coordinates from the lynx dataset
+spdfpr<- spTransform(spdf, newProj)
+proj4string(spdf)<-CRS("+init=epsg:4326") #sets projection attributes on spatial data #Here we have WGS84
+#EPSG:3347	NAD83 / Statistics Canada Lambert	Lambert Conic Conformal (2SP)
+EEMSpts.outer<-spTransform(spdf, CRS("+proj=poly +lat_0=0 +lon_0=-100 +x_0=0 
+            +y_0=0 +ellps=WGS84 +datum=WGS84 +units=m +no_defs")) #transform to WGS 84
+plot(EEMSpts.outer,pch=10,col="black", add = TRUE) #palette=(rainbow(5))
+```
+
+#EEMS Visualizations
+Now that we have EEMS running with out input .coords and .outer files (and .diffs. See my HackMD if you want directions on running bed2diffs).
