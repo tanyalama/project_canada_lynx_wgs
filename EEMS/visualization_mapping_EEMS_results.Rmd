@@ -176,6 +176,122 @@ EEMSpts.outer<-spTransform(spdf, CRS("+proj=poly +lat_0=0 +lon_0=-100 +x_0=0
             +y_0=0 +ellps=WGS84 +datum=WGS84 +units=m +no_defs")) #transform to WGS 84
 plot(EEMSpts.outer,pch=10,col="black", add = TRUE) #palette=(rainbow(5))
 ```
-
 #EEMS Visualizations
-Now that we have EEMS running with out input .coords and .outer files (and .diffs. See my HackMD if you want directions on running bed2diffs).
+Now that we have EEMS running with out input .coords and .outer files (and .diffs. See my HackMD if you want directions on running bed2diffs). The EEMS results can be visualized with the function eems.plots defined in the R package rEEMSplot. The package is not on CRAN, so install it from source instead. (The code is in the directory plotting.)
+```{r}
+## Part 1: Install rEEMSplots
+#We used the following commands to install rEEMSplots
+#Make sure you setwd to the folder (plotting) that includes rEEMSplots before you attempt to install. 
+setwd("/Users/tanyalama/Box/project_canada_lynx_wgs/R_canada_lynx_wgs/EEMS/eems-master/plotting") #This is IMPORTANT
+install.packages("rEEMSplots2",repos=NULL,type="source")
+library(rEEMSplots)
+
+#rEEMSplots requires a few other packages in order to work. If these are not already installed, an error message would appear.
+library(Rcpp)
+library(raster)
+library(rgeos)
+library(sp)
+#install.packages("RcppEigen") #just missing this one
+library(RcppEigen) #all set
+#install.packages(c("Rcpp", "RcppEigen", "raster", "rgeos", "sp"))
+#install.packages("rworldmap") #done
+library("rworldmap")
+#install.packages("rworldxtra") done
+library(rworldxtra)
+install.packages(GhostScript) #what is this
+```
+## Part 2: Generate graphics
+```{r}
+#on the cluster
+mcmcpath = "/project/uma_lisa_komoroske/Tanya/scripts/EEMS/data"
+plotpath = "/Users/tanyalama/Box/project_canada_lynx_wgs/R_canada_lynx_wgs/EEMS/eems-master/runeems_snps/plots_6SV_unfiltered_SNPs-EEMS-nDemes200-chain/plots_trial"
+
+
+#plot all at once
+eems.plots(mcmcpath, plotpath, longlat = TRUE)
+
+eems.output = list.dirs("/Users/tanyalama/Box/project_canada_lynx_wgs/R_canada_lynx_wgs/EEMS/eems-master/runeems_snps/data",recursive = FALSE) ##output of different deme sizes of PO_YEN
+
+projection_none <- "+proj=longlat +datum=WGS84"
+projection_mercator <- "+proj=merc +datum=WGS84"
+
+##plot migration surface for each deme size separately
+for (run in c(1:length(eems.output))) {
+  eems.plots(mcmcpath = eems.output[run],
+             plotpath = plotpath[run],
+             plot.width=8,
+             plot.height=6,
+             longlat = T,
+             add.grid = F,
+             add.demes = T,
+             projection.in = projection_none,
+             projection.out = projection_mercator,
+             out.png=FALSE,
+             min.cex.demes = 0.6,
+             max.cex.demes = 1,
+             col.demes = "red",
+             pch.demes = "o",
+             add.r.squared=F,
+             add.abline = T,
+             remove.singletons = F,
+             add.map = T,
+             col.map="black",
+             lwd.map=0.2,
+             add.title = F)
+}
+
+for (run in c(1:length(eems.output))) {
+  
+  eems.plots(
+            mcmcpath = "/Users/tanyalama/Box/project_canada_lynx_wgs/R_canada_lynx_wgs/EEMS/eems-master/runeems_snps/data/6SV_unfiltered_SNPs-EEMS-nDemes200-chain1",
+             plotpath = plotpath,
+             plot.width=8,
+             plot.height=5,
+             longlat = T,
+             add.grid = F,
+             add.demes = F,
+             projection.in = projection_none,
+             projection.out = projection_mercator,
+             out.png=FALSE,
+             m.plot.xy = {text(spdf, col="black", pch="o")},
+             q.plot.xy = {text(spdf, col="blue", pch="o")},
+             min.cex.demes = 0.6,
+             max.cex.demes = 1,
+             col.demes = "#525252",
+             pch.demes = NA,
+             add.r.squared=F,
+             add.abline = T,
+             remove.singletons = F,
+             add.map = T,
+             col.map="black",
+             lwd.map=0.2,
+             add.title = F)
+
+
+
+plots<-eems.plots(mcmcpath = "/Users/tanyalama/Box/project_canada_lynx_wgs/R_canada_lynx_wgs/EEMS/eems-master/runeems_snps/data/6SV_unfiltered_SNPs-EEMS-nDemes200-chain1", plotpath = plotpath, longlat = TRUE, 
+out.png = FALSE, add.grid = F, add.demes = F)
+
+
+
+extdata_path <- system.file("extdata", package = "rEEMSplots")
+eems_results <- file.path(extdata_path, "EEMS-example")
+name_figures <- file.path(path.expand("~"), "EEMS-example")
+
+datapath <- file.path(extdata_path, "EEMS-example")
+coord__long_lat <- read.table(paste0(datapath, ".coord"))
+
+# Add the original sampling locations on top of the contour plot.
+eems.plots(mcmcpath = eems_results,
+           plotpath = paste0(name_figures, "-sampling-locations"),
+           longlat = TRUE,
+           m.plot.xy = { points(coord__long_lat, col = "purple", pch=18) },
+           q.plot.xy = { points(coord__long_lat, col = "purple", pch=18) })
+
+
+myfilled.legend(levels = mrates.raster$eems.levels, col = mrates.raster$eems.colors, 
+            key.axes = axis(4, tick = FALSE, hadj = 1, line = 4, 
+                cex.axis = 2), key.title = mtext(expression(paste(log, 
+                "(", italic(m), ")", sep = "")), side = 3, cex = 2.5, 
+                line = 1.5, font = 1))
+
