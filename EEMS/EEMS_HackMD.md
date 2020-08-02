@@ -3,12 +3,22 @@ title: 'EEMS'
 disqus: hackmd
 ---
 
-EEMS estimated effetive migration surface using genome-wide SNPs
+Estimated effetive migration surface (EEMS) using genome-wide SNPs
 ===
-This is an implementation of the EEMS method for analyzing and visualizing spatial population structure from geo-referenced genetic samples (Canada lynx). EEMS uses effective migration to model the relationship between genetics and geography, and outputs an estimated effective migration surface (EEMS). It's basically a visual representation of population structure that can highlight potential regions of higher-than average and lower-than-average historic gene flow. In other words, it **highlights features of the landscape where genetic similarity decays faster than expected by null expectations under isolation-by-distance**. 
 
-Please consider reading http://www.nature.com/ng/journal/v48/n1/full/ng.3464.html
-and https://osf.io/xbf5n/ 
+[![hackmd-github-sync-badge](https://hackmd.io/lgVVPmECSuCYcML6ieOFTQ/badge)](https://hackmd.io/lgVVPmECSuCYcML6ieOFTQ)
+This is an implementation of the EEMS method for analyzing and visualizing spatial population structure from geo-referenced genetic samples (Canada lynx). EEMS uses effective migration to model the relationship between genetics and geography, and outputs an estimated effective migration surface (EEMS). It's basically a visual representation of population structure that can highlight fine-scale population structure, and potential regions of higher-than average and lower-than-average historic gene flow. In other words, it **highlights features of the landscape where genetic similarity decays faster than expected by null expectations under isolation-by-distance**. 
+
+EEMS constructs a triangular grid over available habitat. In this situation we are using the USFWS designation of critical habitat (US) and the species distribution (Canada) as "available habitat" for EEMS. EEMS then assigns each geo-referenced individual to its closest vertex (deme) and estimates a migration rate for every edge and a diversity rate for every deme in the grid. 
+
+## Objective: 
+Use EEMS to visualize patterns in 1. estimated effective migration rate 2. effective genomic diversity across the study area
+
+## Additional reading 
+* The EEMS paper: http://www.nature.com/ng/journal/v48/n1/full/ng.3464.html
+* Example implementation: https://osf.io/xbf5n/ 
+* Git Repo: https://github.com/dipetkov/eems
+* My Git: https://github.com/ECOtlama/project_canada_lynx_wgs/tree/master/EEMS
 
 ## Table of Contents
 
@@ -88,21 +98,24 @@ bsub -q long -W 8:00 -R rusage[mem=48000] -n 1 -R span\[hosts=1\] "runeems_snps 
 # Visualize EEMS results
 Finally, the EEMS results can be visualized with the function eems.plots defined in the R package rEEMSplot. The package is not on CRAN, so install it from source instead. (The code is in the directory plotting.)
 
-## Part 1: Install rEEMSplots
-## Check that the current directory contains the rEEMSplots source directory
-if (file.exists("./rEEMSplots")) {
-  install.packages("rEEMSplots", repos = NULL, type = "source")
-} else {
-  stop("Move to the directory that contains the rEEMSplots source to install the package.")
-}
+Visit [my github to see the RMarkdown](https://raw.githubusercontent.com/ECOtlama/project_canada_lynx_wgs/master/EEMS/visualization_mapping_EEMS_results.Rmd): that includes local installation of the rEEMSplot package and visualizations. 
 
-## Part 2: Generate graphics
-library(rEEMSplots)
+# Results
+## Estimated effective migration rate
+The between-demes component characterizes the expected genetic dissimilarity between two individuals from distinct demes and is a function of the effective migration rate. It represents dissimilarity that is due to the spatial structure of the population and is not a consequence of the local diversity in the two demes. Colors in the estimated effective migration surface correspond to local deviations from isolation by distance: in particular, effective migration is low **(orange) in geographic regions where genetic similarity decays quickly**.
 
-mcmcpath = "./data/barrier-schemeX-nIndiv300-nSites3000-EEMS-nDemes200-simno1"
-plotpath = "./plot/barrier-schemeX-nIndiv300-nSites3000-EEMS-nDemes200-simno1-rEEMSplots"
+![](https://i.imgur.com/8pF9SZW.png)
 
-eems.plots(mcmcpath, plotpath, longlat = TRUE)
+## Estimated effective diversity rate
+EEMS accounts for local variation in genetic diversity when modeling spatial patterns in genetic dissimilarity. Genetic dissimilarity can therefore be partitioned into two components 1. within-demes (diversity) and 2. between demes (migration). The "within-demes" component, W, characterizes expected genetic dissimilarity between individuals from the same deme, and is a function of the effective diversity rate. Diversity parameters can be visualized on the log10 scale, so that **blue indicates higher than average diversity and orange indicates lower than average diversity**. 
+
+
+![](https://i.imgur.com/4KpOQqT.jpg)
+
+## Interpretation
+EEMS confirms the results from our other analyses (PCA, sNMF) indicating that the St. Lawrence River is not a complete barrier to gene flow. We've detected multiple bi-directional dispersal events north-south of the St. Lawrence River and one dispersal event between Newfoundland and mainland Canada. However, genetic similarity north-south of the St. Lawrence River decays faster than expected by null expectations under isolation-by-distance. 
+
+effective migration rates m
 
 
 ## Appendix and FAQ
