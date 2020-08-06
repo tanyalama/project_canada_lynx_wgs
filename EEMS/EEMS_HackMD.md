@@ -7,17 +7,19 @@ Estimated effetive migration surface (EEMS) using genome-wide SNPs
 ===
 
 [![hackmd-github-sync-badge](https://hackmd.io/lgVVPmECSuCYcML6ieOFTQ/badge)](https://hackmd.io/lgVVPmECSuCYcML6ieOFTQ)
-This is an implementation of the EEMS method for analyzing and visualizing spatial population structure from geo-referenced genetic samples (Canada lynx). EEMS uses effective migration to model the relationship between genetics and geography, and outputs an estimated effective migration surface (EEMS). It's basically a visual representation of population structure that can highlight fine-scale population structure, and potential regions of higher-than average and lower-than-average historic gene flow. In other words, it **highlights features of the landscape where genetic similarity decays faster than expected by null expectations under isolation-by-distance**. 
 
-EEMS constructs a triangular grid over available habitat. In this situation we are using the USFWS designation of critical habitat (US) and the species distribution (Canada) as "available habitat" for EEMS. EEMS then assigns each geo-referenced individual to its closest vertex (deme) and estimates a migration rate for every edge and a diversity rate for every deme in the grid. 
+from the EEMS manual: 
+This is an implementation of the EEMS method for analyzing and visualizing spatial population structure from geo-referenced genetic samples (Canada lynx). EEMS uses effective migration to model the relationship between genetics and geography, and outputs an estimated effective migration surface (EEMS). It's basically a visual representation of population structure that can highlight fine-scale population structure, and potential regions of higher-than average and lower-than-average historic gene flow. In other words, it **highlights features of the landscape where genetic similarity decays faster than  expectations under isolation-by-distance**. 
+
+EEMS constructs a triangular grid over available habitat. In this situation we are using a shapefile encompassing the USFWS designation of critical habitat (US) and the species distribution (Canada) as "available habitat". EEMS then assigns each geo-referenced individual to its closest vertex (deme) and estimates a migration rate for every edge and a diversity rate for every deme in the grid. 
 
 ## Objective: 
-Use EEMS to visualize patterns in 1. estimated effective migration rate 2. effective genomic diversity across the study area
+Use EEMS to visualize patterns in 1. estimated effective migration rate 2. genomic diversity across the study area
 
 ## Additional reading 
 * The EEMS paper: http://www.nature.com/ng/journal/v48/n1/full/ng.3464.html
 * Example implementation: https://osf.io/xbf5n/ 
-* Git Repo: https://github.com/dipetkov/eems
+* Author git Repo: https://github.com/dipetkov/eems
 * My Git: https://github.com/ECOtlama/project_canada_lynx_wgs/tree/master/EEMS
 
 ## Table of Contents
@@ -35,41 +37,40 @@ module load plink/1.07
 ### datapath.diffs
 .diffs is a matrix of average pairwise differences (computed with bed2diffs). bed2diffs reads genotypes in PLINK binary format and computes the matrix of average pairwise differences as an input for EEMS
 
-The VCF we want to use is: /project/uma_lisa_komoroske/Tanya/Rgenomics/mLynCan4_v1.p_lynxonly/6_SV_rmClusterSNP_BiSNP_SV_HardFilter_SV_all_mLynCan4_v1.p_HighQualSites_processed.vcf.gz
-which includes all individuals in our three lynx populations (NFLD, NSLR, SSLR). We need to make sure the VCF is available in binary (bin/fam) format from PLINK.
+The VCF we want to use is: /project/uma_lisa_komoroske/Tanya/Rgenomics/mLynCan4_v1.p_lynxonly/6_SV_HighQualSites_processed.vcf.gz  which includes all individuals in our three lynx populations (NFLD, NSLR, SSLR). 
+
+Convert the VCF to binary (bin/fam) format using PLINK.
 ```
 plink --vcf 6_SV_rmClusterSNP_BiSNP_SV_HardFilter_SV_all_mLynCan4_v1.p_HighQualSites_processed.vcf.gz --allow-extra-chr '0'
 ```
 
-
-Note: I am considering using SNPSift to create a VCF file that is only intergenic (neutral) SNPs for this...
-
 ### Workaround for plink -allow-extra-chr
-plinkio is having trouble with an "unrecognized chromosome code" because we're using a non-human genome with more chromosomes than expected and chromosome names that differ from the expected names in hg19 (must start with a letter). You can expect to have this issue with downstream analyses (e.g. ADMIXTURE) if you're using a VGP genome or a draft genome with scaffolds rather than chromosomes.
+plinkio is having trouble with an "unrecognized chromosome code" because we're using a non-human genome with more chromosomes than expected and chromosome names that differ from the expected names e.g. those in hg19 (that start with a letter, not a number). You can expect to have this issue with downstream analyses if you're using a VGP genome or a draft genome with scaffolds rather than chromosomes.
+
 The solution is this: 
 #### 1. use plink 1.90 to convert VCF to ped/map format
 ```
 plink --vcf  6SV_unfiltered_SNPs.vcf.gz --recode --allow-extra-chr
 ```
-#### 2. remove plink and module load plink/1.07
+#### 2. unload plink and module load plink/1.07
 #### 3. use plink 1.07 to convert ped/map format to binary (bed/bim/fam). 
 ```
 plink 6SV_unfiltered_SNPs --make-bed
 ```
-#### 4. proceed with bed2diffs using the 6SV_unfiltered_SNPs bed/bim/fam files
+#### 4. proceed with bed2diffs using the 6SV_SNPs bed/bim/fam files
  
 
 ### bed2diffs -- this runs pretty quick
 working directory is /project/uma_lisa_komoroske/Tanya/scripts/EEMS
 Usage: 
 ```
-bsub -q short -W 0:30 -R rusage[mem=1000] -n 2 -R span\[hosts=1\] "bed2diffs_v1 --bfile 6SV_unfiltered_SNPs --nthreads 2" #8377918
+bsub -q short -W 0:30 -R rusage[mem=1000] -n 2 -R span\[hosts=1\] "bed2diffs_v1 --bfile 6SV_unfiltered_SNPs --nthreads 2"
 ```
 bed2diffs generates two files. The matrix of average pairwise differences is written to a text file without row names, column names or comments, with extension .diffs. The size of the matrix is NxN where N is the number of samples; there are only 0s on the main diagonal. The order of the samples in the diffs matrix is the same as in the fam file, but in any case, the order is explicitly written to a text file with one sample per line, with extension order.
+
 ### Load the dissimilarity matrix into R
 ```
-diffs<- read.table("/project/uma_lisa_komoroske/Tanya/Rgenomics/mLynCan4_v1.p_lynxonly/6SV_unfiltered_SNPs.diffs")
-diffs
+diffs<- read.table("/project/uma_lisa_komoroske/Tanya/Rgenomics/mLynCan4_v1.p_lynxonly/6SV_SNPs.diffs")
 ```
 Note: you should see a matrix with 0.00 along the diagonal
 
@@ -79,26 +80,24 @@ We have generated these coords for previous mapping, and had to convert them fro
 
 ### datapath.outer
 .outer is a list of habitat coordinates as a sequence of vertices that outline a closed polygon. 
-This was a pain in the ass to get. I tried to coerce various SpatialPolygonsDataFrames to lines and then points, which worked great. But EEMS .outer format requires the points to be listed in order, counterclockwise. So ultimately, after many hours of toiling we ended drawing points along the Canada lynx species critical habitat shapefile and formatting it according to the specifications in EEMS manual. 
+
+This was a pain in the ass. I tried to coerce various SpatialPolygonsDataFrames to lines and then points, which looked great. But EEMS .outer format requires the points to be listed in counterclockwise order. So ultimately, after many hours of toiling we ended up drawing points along our available habitat shapefile and formatting it according to the specifications in EEMS manual. 
 The final .outer file is called /Users/tanyalama/Box/project_canada_lynx_wgs/R_canada_lynx_wgs/EEMS/IUCN_redlist_Canada_lynx_spp_distribution/EEMS_outer_arcgis_pts.csv
 
 ### Edit the parameter file params-chain1.ini
-We changed the relevant fields in the first params file. Namely, the paths and the number of individuals and nSites (n SNPs). 
+We changed the relevant fields in the first params file (see manual). Namely, the paths and the number of individuals and nSites (n SNPs -- this is listed in the plink conversion output, make note). 
 
-## Run EEMS (on the command line) 
-Run EEMS (on the command line)with three different random seeds. The argument --seed is optional;it can be specified in the parameter file as well, and if not specified, the seed is randomly assigned.
-We'll try this in an interactive session 
-bsub -q interactive -R rusage[mem=24000] -n 1 -W 30 -Is bash
+## Run at least 3 rounds of EEMS (on the command line) 
+Run EEMS with params-chain1.ini, -chain2.ini, -chain3.ini. The argument --seed is optional;it can be specified in the parameter file or in the command, and if not specified, the seed is randomly assigned. (try this in a interactive session if it's your first time!)
 ```
 bsub -q long -W 8:00 -R rusage[mem=48000] -n 1 -R span\[hosts=1\] "runeems_snps --params ./src/params-chain1.ini"
-./runeems_snps --params params-chain2.ini --seed 456
-./runeems_snps --params params-chain3.ini --seed 789
 ```
 
 # Visualize EEMS results
-Finally, the EEMS results can be visualized with the function eems.plots defined in the R package rEEMSplot. The package is not on CRAN, so install it from source instead. (The code is in the directory plotting.)
+Finally, the EEMS results can be visualized with the function eems.plots defined in the R package rEEMSplot. The package is not on CRAN, so install it from source instead. (The plotting code is in the directory "plotting".)
 
-Visit [my github to see the RMarkdown](https://raw.githubusercontent.com/ECOtlama/project_canada_lynx_wgs/master/EEMS/visualization_mapping_EEMS_results.Rmd): that includes local installation of the rEEMSplot package and visualizations. 
+Visit [my github to see the RMarkdown](https://raw.githubusercontent.com/ECOtlama/project_canada_lynx_wgs/master/EEMS/visualization_mapping_EEMS_results.Rmd)
+I describe local installation of the rEEMSplot package and steps for visualization of the results. 
 
 # Results
 ## Estimated effective migration rate
@@ -113,10 +112,11 @@ EEMS accounts for local variation in genetic diversity when modeling spatial pat
 ![](https://i.imgur.com/4KpOQqT.jpg)
 
 ## Interpretation
-EEMS confirms the results from our other analyses (PCA, sNMF) indicating that the St. Lawrence River is not a complete barrier to gene flow. We've detected multiple bi-directional dispersal events north-south of the St. Lawrence River and one dispersal event between Newfoundland and mainland Canada. However, genetic similarity north-south of the St. Lawrence River decays faster than expected by null expectations under isolation-by-distance. 
+EEMS confirms the results from our other analyses (PCA, sNMF) indicating that the St. Lawrence River is not a complete barrier to gene flow. We've detected multiple bi-directional dispersal events north-south of the St. Lawrence River and one dispersal event between Newfoundland and mainland Canada. However, genetic similarity north-south of the St. Lawrence River decays faster than expected under isolation-by-distance. 
 
-effective migration rates m
+This connectivity pattern relates directly to metrics of genetic diversity, which are well-supported by genomic diversity rates output by EEMS. We see (above) that lower-than-expected historic gene flow between island populations and mainland Canada has eroded genetic diversity in the Cape Breton Island and Newfoundland populations. Despite evidence of connectivity, genetic diversity south of the St Lawrence River (including Maine) is lower than that north of the St. Lawrence River. 
 
+See the Status Report on lynx in Nova Scotia for further interpretation about which populations have been in decline/extirpated/protected etc in the last 50 years.
 
 ## Appendix and FAQ
 
