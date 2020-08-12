@@ -1,0 +1,271 @@
+---
+title: "LFMM.Rmd"
+author: "Tanya Lama"
+date: "8/3/2020"
+output:
+  pdf_document: default
+  html_document: default
+editor_options:
+  chunk_output_type: console
+---
+Latent factor mixed modeling (LFMM) is used to detect specific loci with strong environmental associations suggestive of natural selection for local adaptation. Population genetic variation is influenced by demography, mating patterns, and natural selection, each of which is shaped by the environment. Theoretically, demographic changes and gene flow ("neutral" processes) affect genetic variation throughout the genome, whereas natural selection affects a relatively small number of genes. To disentangle which parts of the genome are under natural selection by the environment, we can use genome-wide data sets to identify SNPs/alleles that are strongly associated with environmental variables after accounting for the background association of genetic variation with the environment due to demographic patterns. These "outliers" are candidate loci that could be under the influence of natural selection for local adaptation along the environmental gradient. We will use latent factor mixed models (LFMM), which is a method that can handle individual-based data (rather than "population"-based) and is considered to be a powerful method for detecting loci under selection. 
+
+I discussed this with Brenna Forester last week. She suggested I could combine LFMM with GDM or another multivariate ordination method like redundancy analysis (RDA) (e.g. Forester et al. 2018). Brenna says that LFMM is more conservative than BayEnv2 or BayeScan, but GDM is even *more* conservative because it does a better job of partitioning variance between netural processes and actual selection. Here we'll present what was done for LFMM
+ 
+Refer to Frichot et al. (2013) for details of LFMM 
+
+#Climate data
+We'll use WorldClim data which I have downloaded to the LFMM/climate_data in GeoTIFF (.tif) format. Now we will take the raw data and prepare it for our LFMM and RDA analyses in R
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd("/Users/tanyalama/Box Sync/project_canada_lynx_wgs/R_canada_lynx_wgs/LFMM")
+library(raster)
+library(rgdal)
+library(lfmm)
+library(LEA)
+library(qvalue)
+
+clim.list <- dir("/Users/tanyalama/Box Sync/project_canada_lynx_wgs/R_canada_lynx_wgs/LFMM (tlama@umass.edu)/climate_data/wc2.1_10m_bio", full.names=T, pattern='.tif')  #makes list of file paths for each layer
+clim.layer <-  stack(clim.list)  #stacks the layers into a single object "RasterStack"
+
+#We can view the climate data layers as maps using the plot function
+#pdf("clim.layer.pdf") #only if you are on cluster and want to print as a pdf
+plot(clim.layer) #works
+#dev.off() #only if you're on the cluster
+
+#Load sample names and coordinates
+sample.coord<- read.table("/Users/tanyalama/Box Sync/project_canada_lynx_wgs/R_canada_lynx_wgs/LFMM (tlama@umass.edu)/WGS_locations_WGS84_lynxonly.csv", header=T, stringsAsFactors = F, sep = ",")
+sample.coord #we need to select just the lynx samples that are part of the SNP data (no bobcat yet)
+sample.coord$sample<- c("L155","LIC11","LIC20","LIC23","LIC24","LIC27B","LIC28","LIC31","LIC32","LIC36","LIC46","LIC47","LIC48","LIC54","LIC57","LIC60","LIC8","LIC9","LIT2","LIT5","LRK10","LRK11","LRK12","LRK13","LRK17","LRK22","a109","a182","A202","a33","a475","A494","a507","a697","A772","a794","A803","A818","A857","B114","B124","B13","b188","B23","b276","B554","b90","c165","c323","c548","CB15","CB42","CB7","f264","f457","FHA_024","FHA_042","FHA_043","L09_003","L09_007","L09_015")
+
+#Define the spatial projection system (WGS84)
+crs.wgs <- "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"  
+sample.coord.sp <- SpatialPointsDataFrame(sample.coord[,c('Longitude','Latitude')], proj4string=CRS(crs.wgs), data=sample.coord)
+
+#Extract the climate data for each point (projection of climate layer and coordinates must match)
+clim.points <- extract(clim.layer, spdftrans) 
+plot(clim.points)
+
+#Save climate data without sample names, latitude, longitude, or column names for LFMM
+clim.env <- clim.points[, 4:7] #which ones do we want??
+colnames(clim.env) <- NULL #"wc2.1_10m_bio_12" "wc2.1_10m_bio_13" "wc2.1_10m_bio_14" "wc2.1_10m_bio_15"
+clim.env
+write.table(clim.env, "/Users/tanyalama/Box Sync/project_canada_lynx_wgs/R_canada_lynx_wgs/LFMM (tlama@umass.edu)/climate_data/clim.env", sep="\t", quote=F, row.names=F) #even though I removed the header, LFMM continued thinking that the clim.env object was longer (length=62) than the snp object (length=61). I used nano to paste them the clim.env columns into a new object without headers. LFMM was able to use.
+```
+Note that instead of using climate variables directly, we ALSO ran LFMM using use principal components of the climate variables as uncorrelated, synthetic climate variables. We found that PCA decomposed variables into major components, PC1 loaded most of the temperature variables and PC2 loaded most of the precip variables and they accounted for 77% and 17% of the variation in our data respectively. I can't remember where I had run that PC, but I will track down the code and add it below. When dealing with correlated climate variables (as is typically the case), this strategy may be preferrable, but in the code below we will simply use the climate variables themselves. I discussed this with Brenna and she didn't favor either method. RDA and GDM actually use the climate variables directly rather than PC's, so as long as you are addressing multicollinearity and mutiple-testing, you are OK.
+
+#Using PCA to decompose  environmental variables into synthetic variables for LFMM
+```{r}
+insert here
+```
+
+#Assessing population strcuture
+LFMM accounts for background associations of genetic variation with environmental variation using latent factors to model unobserved variation. A key step is determining the number of latent factors to include, as this affects power. It's advised to start with the number of clusters (K) as the initial value. We have estimated K=3 using PCA and sNMF in the LEA package in R (this is presented in other scripts and we're confident on the K=3 finding). 
+
+#Latent factor mixed modeling (LFMM)
+
+We'll use temperature seasonality (bio4 = tseas), minimum temperature of coldest month (bio6 = tmin), precipitation seasonality (bio15 = pseas), and precipitation of the coldest quarter (bio19 = Pdry)
+
+We're ready to run LFMM! We can run it simultaneously for all the climate variables contained in our climate data table (default) or one at a time. Run the following basic command: 
+
+Note that the number of iterations here is lower than we've run just to try and get RMarkdown to publish our code. We should run 10k iterations with a burning of at least 500. Note K=3 in agreement with the results of our clustering analyses. Also note that we are using an LD-pruned SNP set from LEA.
+```{r}
+project = NULL
+project = lfmm("LD_pruned_snp.lfmm", "future_lynx_clim.env", K = 3, repetitions = 3, CPU = 16, iterations = 10, burnin = 5, project = "new")
+```
+This specifies the file name with the SNP input data in 012 format, the K number of clusters inferred (above) and the number of reps for the model to run, n processors to use, n iterations, and burn-in. Each can be adjusted, but you want to run 5-10 reps and increase the n iterations and burnin 10-fold (at least). 
+
+When LFMM is done running, we combine the data from >3 repetitions and compute new calibrated P-values. To do that, first extract the z-scores for all reps for a given climate variable, then take the median. This can be done using the LEA function z.scores and the base function apply to take the median at each locus. Here is an example for association tests with Pdry.
+```{r}
+z.pdry = z.scores(project, K = 3, d = 1)
+z.pdry <- apply(z.pdry, 1, median)
+```
+
+Next, we need to calculate λ (the "genomic inflation factor"), which is commonly used for calibration of P-values. However, it is often considered too conservative, so some suggest using a value lower than λ for the calibration. λ is calculated from the median of the median z-scores (from above) and a χ2 distribution for each set of associations:
+```{r}
+lambda.pdry = median(z.pdry^2)/qchisq(0.5, df = 1)
+lambda.pdry
+```
+The calibrated or "adjusted" P-values are then calculated as follows:
+```{r}
+p.pdry.adj = pchisq(z.pdry^2/lambda.pdry, df = 1, lower = FALSE)
+```
+
+Now, repeat this correction procedure with the other three climate variables. Note that the value of d changes below to get the results for the second climate variable, which is pseas. Be sure to change d accordingly to retrieve results for each climate variable.
+```{r}
+z.pseas = z.scores(project, K = 3, d = 2)
+z.pseas <- apply(z.pseas, 1, median)
+lambda.pseas = median(z.pseas^2)/qchisq(0.5, df = 1)
+p.pseas.adj = pchisq(z.pseas^2/lambda.pseas, df = 1, lower = FALSE)
+
+z.tmin = z.scores(project, K = 3, d = 3)
+z.tmin <- apply(z.tmin, 1, median)
+lambda.tmin = median(z.tmin^2)/qchisq(0.5, df = 1)
+p.tmin.adj = pchisq(z.tmin^2/lambda.tmin, df = 1, lower = FALSE)
+
+z.tseas = z.scores(project, K = 3, d = 4)
+z.tseas <- apply(z.tseas, 1, median)
+lambda.tseas = median(z.tseas^2)/qchisq(0.5, df = 1)
+p.tseas.adj = pchisq(z.tseas^2/lambda.tseas, df = 1, lower = FALSE)
+
+z.bio6 = z.scores(project, K = 3, d = 5)
+z.bio6 <- apply(z.bio6, 1, median)
+lambda.bio6 = median(z.bio6^2)/qchisq(0.5, df = 1)
+p.bio6.adj = pchisq(z.bio6^2/lambda.bio6, df = 1, lower = FALSE)
+```
+
+To confirm that the model is behaving well with the K we chose and the adjustments to P, we need to inspect histograms of the P-values. The "best" K and proper calibration value will lead to histograms of P-values that are flat, except perhaps with an elevated frequency of very low P-values, representing the outliers. We can make all the histograms in a multi-paneled plot very simply with the base hist function. #looks good!!
+```{r eval=FALSE, include=FALSE}
+pdf("LFMM_P_Histograms.pdf")
+par(mfrow = c(5,1))
+hist(p.pdry.adj, col = "blue", main = "Pdry", xlab='')
+hist(p.pseas.adj, col = "blue", main = "Pseas", xlab='')
+hist(p.tmin.adj, col = "blue", main = "Tmin", xlab='')
+hist(p.tmin.adj, col = "blue", main = "Tseas", xlab='')
+hist(p.tseas.adj, col = "blue", main = "BIO6", xlab=expression(italic(P)))
+dev.off()
+```
+How do these look?: Flat, with a slight elevation at the lowest pvalues. Looks good! Refer back to the LEA/LFMM manual for guidance if you're unsure. If they suggest an overly conservative (right skew) or overly liberal (left skew) model/calibration, then we could repeat the analysis with a lower or higher value of K, respectively, or if there is slight right skew we might consider substituting a value lower than λ to manually calibrate. Keep in mind that we are working with a very small sample size in this tutorial, so the patterns may not be typical. These plots looked good, so we're going to stick with our chosen K value of 3.
+
+Once we are convinced that the model is behaving well, we can move on. But, there is one final adjustment we need to make. We need to correct for multiple testing. We performed thousands of statistical tests (one per locus per climate variable), so many tests will appear significant by chance. The most common method of multiple testing correction is the false discovery rate (FDR) method of Benjamini and Hochberg (instead of Bonferroni correction, for example). In this process, we will adjust the P-values to Q-values. This correction can be easily implemented with the library qvalue.
+```{r}
+library(qvalue)
+q.pdry<-qvalue(p.pdry.adj)$qvalues
+sum(q.pdry<0.01)
+q.pseas<-qvalue(p.pseas.adj)$qvalues
+sum(q.pseas<0.01)
+q.tmin<-qvalue(p.tmin.adj)$qvalues
+sum(q.tmin<0.01)
+q.tseas<-qvalue(p.tseas.adj)$qvalues
+sum(q.tseas<0.01)
+q.bio6<-qvalue(p.bio6.adj)$qvalues
+sum(q.bio6<0.01) 
+```
+#We found that roughly 9% of SNPs were significantly (<0.01) associated with at least one climate variable.
+
+############## 
+For perspective, how many candidate outliers do we get, if we remove the qvalue multiple testing correction?
+How does the number of significant tests based on Q-values (e.g., sum(q.pdry<0.05)) compare to the P-values (e.g., sum(p.pdry.adj<0.05))?
+```{r}
+sum(p.pdry.adj<0.01)
+sum(p.pseas.adj<0.01)
+sum(p.tmin.adj<0.01)
+sum(p.tseas.adj<0.01)
+sum(p.bio6.adj<0.01)
+par(mfrow = c(5,1))
+```
+#Basically: a lot You can visualize them here using a manhattan plot, but no need really:
+```{r}
+plot(-log10(p.pdry.adj), pch = 19, col = "blue", cex = .7, xlab = '', main="significant SNP x env association significance <0.01", ylim=(c(0,7))) + abline(h=2, col="red")
+plot(-log10(p.pseas.adj), pch = 19, col = "blue", cex = .7, xlab = '', ylim=(c(0,5))) + abline(h=2, col="red")
+plot(-log10(p.tmin.adj), pch = 19, col = "blue", cex = .7, xlab = '', ylim=(c(0,2))) + abline(h=2, col="red")
+plot(-log10(p.tseas.adj), pch = 19, col = "blue", cex = .7, xlab = '', ylim=(c(0,5))) + abline(h=2, col="red")
+plot(-log10(p.bio6.adj), pch = 19, col = "blue", cex = .7, xlab = "SNP (ordered by contig arbitrarily)", ylim=(c(0,5))) + abline(h=2, col="red")
+```
+A common way to visually summarize large numbers of association tests is using Manhattan plots. All we need to do is plot -log10(Q) for each of the sets of association tests. 
+```{r}
+pdf("LFMM_Manhattan.pdf")
+par(mfrow = c(5,1))
+plot(-log10(q.pdry), pch = 19, col = "blue", cex = .7, xlab = '', main="significant SNP x env association significance <0.05 & < 0.01", ylim=(c(0,5))) + abline(h=2, col="red")
+plot(-log10(q.pseas), pch = 19, col = "blue", cex = .7, xlab = '', ylim=(c(0,2)))
+plot(-log10(q.tmin), pch = 19, col = "blue", cex = .7, xlab = '', ylim=(c(0,2)))
+plot(-log10(q.tseas), pch = 19, col = "blue", cex = .7, xlab = '', ylim=(c(0,2)))
+plot(-log10(q.bio6), pch = 19, col = "blue", cex = .7, xlab = "SNP (ordered by contig arbitrarily)", ylim=(c(0,2)))
+dev.off()
+```
+-log10(0.01) = 2, so you can see that there are many extremely high values greater than 2, representing significant associations. How many of the significant associations (Q < 0.01) are *also of large effect*? To answer this question, you can look at the set of significant SNPs that also have very high or very low z-scores.
+
+We can pull loci that meet both criteria like this:
+```{r}
+sum(q.pdry<0.05 & abs(z.pdry)>1.3) 
+
+#We can also look for SNPs that have significant relationships with multiple climate variables
+
+sum(q.pdry<0.05 & abs(z.pdry)>2 & q.pseas<0.05 & abs(z.pseas)>2) #5711!
+
+#Explore the results further in this way. Finally, we might want to combine all the z and Q-values into a single table and then save for future use.
+
+lfmm.results <- cbind(z.pdry, q.pdry, z.pseas, q.pseas, z.tmin, q.tmin, z.tseas, q.tseas, z.bio6, q.bio6)
+head(lfmm.results)  #Note that the SNP locus numbers and positions are absent.
+```
+Now that we've identified a bunch of loci that meet our criteria for significant association and large effect, we can save those positions as a matrix for annotation with SNPEff and SNPSift
+
+#save the positions and write to matrix for annotation
+```{r}
+locusposition<- lfmm_results[,1:2]
+write.matrix(locusposition, "/project/uma_lisa_komoroske/Tanya/scripts/LFMM/outlier_loci_circ_therm/lfmm_results")
+```
+#And now we do the whole thing over again with the same SNPset and projected bioclimatic variables from 2061-2080
+We'll then compare significant associations that differ between present and future.
+
+#Future Climate Data
+SSP2 represents a “middle of the road” scenario historical patterns of development are continued throughout the 21st century. We'll prepare bioclimatic variables from SSP2 as above, and run LFMM in the same way. 
+https://www.worldclim.org/data/bioclim.html
+
+#See the HackMD for candidate loci annotation and results
+
+
+###################Scratch Pad -- ignore but please don't delete this
+```{r}
+snp.names <-read.table("/project/uma_lisa_komoroske/Tanya/scripts/LFMM/outlier_LD_pruned_snps/mLynCan4v1p_filtered_reduced.012.pos", header=F)
+colnames(snp.names) <- c("locus", "position")
+lfmm.results <- cbind(snp.names, lfmm.results)
+head(lfmm.results)  #Now we have a clear table with locus names and LFMM results
+
+write.table(lfmm.results, "/project/uma_lisa_komoroske/Tanya/scripts/LFMM/outlier_LD_pruned_snps/future_outlier_LD_pruned_snps.csv", sep="\t", quote=F, row.names=F)
+```
+#Extract portions of the lfmm results table e.g.:
+```{r}
+#Significant relationship with one specific climate variable (Pdry)
+###########################
+#one/five factors
+future_LD_pruned_lfmm_results_all<-(lfmm.results[ which(lfmm.results$q.pdry < 0.01 & abs(lfmm.results$z.pdry) > 2 | lfmm.results$q.pseas < 0.01 & abs(lfmm.results$z.pseas) > 2 | lfmm.results$q.tmin < 0.01 & abs(lfmm.results$z.tmin) > 2 | lfmm.results$q.tseas < 0.01 & abs(lfmm.results$z.tseas) > 2 | lfmm.results$q.bio6 < 0.01 & abs(lfmm.results$z.bio6) > 2), ]) #51948
+###########################
+#two/five factors
+nrow(lfmm.results[ which(lfmm.results$q.pdry < 0.01 & abs(lfmm.results$z.pdry) > 2 & lfmm.results$q.pseas < 0.01 & abs(lfmm.results$z.pseas) > 2), ]) #29
+nrow(lfmm.results[ which(lfmm.results$q.pdry < 0.01 & abs(lfmm.results$z.pdry) > 2 & lfmm.results$q.tmin < 0.01 & abs(lfmm.results$z.tmin) > 2), ]) #219
+nrow(lfmm.results[ which(lfmm.results$q.pdry < 0.01 & abs(lfmm.results$z.pdry) > 2 & lfmm.results$q.tseas < 0.01 & abs(lfmm.results$z.tseas) > 2), ]) #114
+nrow(lfmm.results[ which(lfmm.results$q.pseas < 0.01 & abs(lfmm.results$z.pseas) > 2 & lfmm.results$q.tmin < 0.01 & abs(lfmm.results$z.tmin) > 2), ]) #34
+nrow(lfmm.results[ which(lfmm.results$q.pseas < 0.01 & abs(lfmm.results$z.pseas) > 2 & lfmm.results$q.tseas < 0.01 & abs(lfmm.results$z.tseas) > 2), ]) #291
+nrow(lfmm.results[ which(lfmm.results$q.tmin < 0.01 & abs(lfmm.results$z.tmin) > 2 & lfmm.results$q.tseas < 0.01 & abs(lfmm.results$z.tseas) > 2), ])#586
+nrow(lfmm.results[ which(lfmm.results$q.bio6 < 0.01 & abs(lfmm.results$z.bio6) > 2 & lfmm.results$q.pdry < 0.01 & abs(lfmm.results$z.pdry) > 2), ])
+nrow(lfmm.results[ which(lfmm.results$q.bio6 < 0.01 & abs(lfmm.results$z.bio6) > 2 & lfmm.results$q.pseas < 0.01 & abs(lfmm.results$z.pseas) > 2), ])
+nrow(lfmm.results[ which(lfmm.results$q.bio6 < 0.01 & abs(lfmm.results$z.bio6) > 2 & lfmm.results$q.tmin < 0.01 & abs(lfmm.results$z.tmin) > 2), ])
+nrow(lfmm.results[ which(lfmm.results$q.bio6 < 0.01 & abs(lfmm.results$z.bio6) > 2 & lfmm.results$q.tseas < 0.01 & abs(lfmm.results$z.tseas) > 2), ])
+###########################
+#five/five factors --none
+nrow(lfmm.results[ which(lfmm.results$q.pdry < 0.01 & abs(lfmm.results$z.pdry) > 2 & lfmm.results$q.pseas < 0.01 & abs(lfmm.results$z.pseas) > 2 & lfmm.results$q.tmin < 0.01 & abs(lfmm.results$z.tmin) > 2 & lfmm.results$q.tseas < 0.01 & abs(lfmm.results$z.tseas) > 2 & lfmm.results$q.bio6 < 0.01 & abs(lfmm.results$z.bio6) > 2), ])
+
+###########################
+#Create an object lfmm_results_two_factor selecting all of the SNPs that associate with at least 2 variables
+lfmm_results_two_factor<- (lfmm.results[ which(lfmm.results$q.pdry < 0.01 & abs(lfmm.results$z.pdry) > 2 & lfmm.results$q.pseas < 0.01 & abs(lfmm.results$z.pseas) > 2 | lfmm.results$q.pdry < 0.01 & abs(lfmm.results$z.pdry) > 2 & lfmm.results$q.tmin < 0.01 & abs(lfmm.results$z.tmin) > 2 | lfmm.results$q.pdry < 0.01 & abs(lfmm.results$z.pdry) > 2 & lfmm.results$q.tseas < 0.01 & abs(lfmm.results$z.tseas) > 2 | lfmm.results$q.pseas < 0.01 & abs(lfmm.results$z.pseas) > 2 & lfmm.results$q.tmin < 0.01 & abs(lfmm.results$z.tmin) > 2 | lfmm.results$q.pseas < 0.01 & abs(lfmm.results$z.pseas) > 2 & lfmm.results$q.tseas < 0.01 & abs(lfmm.results$z.tseas) > 2 | lfmm.results$q.tmin < 0.01 & abs(lfmm.results$z.tmin) > 2 & lfmm.results$q.tseas < 0.01 & abs(lfmm.results$z.tseas) > 2), ]) #1219
+
+lfmm_results<-(lfmm.results[ which(lfmm.results$q.pdry < 0.05 & abs(lfmm.results$z.pdry) > 1.3), ])
+
+#write two factor to csv
+write.csv(future_LD_pruned_lfmm_results_all, "/project/uma_lisa_komoroske/Tanya/scripts/LFMM/outlier_LD_pruned_snps/LD_pruned_lfmm_results_all.csv")
+
+#save the positions and write to matrix for annotation
+locusposition<- future_LD_pruned_lfmm_results_all[,1:2]
+write.matrix(locusposition, "/project/uma_lisa_komoroske/Tanya/scripts/LFMM/outlier_LD_pruned_snps/future_LD_pruned_lfmm_results_all_positions")
+
+#three/four factors
+lfmm_results_pdry_pseas_tmin<-(lfmm.results[ which(lfmm.results$q.pdry < 0.01 & abs(lfmm.results$z.pdry) > 2 & lfmm.results$q.pseas < 0.01 & abs(lfmm.results$z.pseas) > 2 & lfmm.results$q.tmin < 0.01 & abs(lfmm.results$z.tmin)>2), ]) #2
+
+#four/four factors --none
+lfmm.results[ which(lfmm.results$q.pdry < 0.01 & abs(lfmm.results$z.pdry) > 2 & lfmm.results$q.pseas < 0.01 & abs(lfmm.results$z.pseas) > 2 & lfmm.results$q.tmin < 0.01 & abs(lfmm.results$z.tmin) > 2 & lfmm.results$q.tseas < 0.01 & abs(lfmm.results$z.tseas) > 2), ] #0
+
+#write three/four to csv
+write.csv(lfmm_results_pdry_pseas_tmin, "/project/uma_lisa_komoroske/Tanya/scripts/LFMM/lfmm_results_pdry_pseas_tmin.csv")
+
+#Subset a VCF using position data from two factor and three factor
+See the HackMD for these details.
+#Allele frequencies at each position
+See the HackMD for these details
+#SNPSift Annotate VCF
+
+#You can also make "or" statements with "|" as the operator
+
+See : https://baylab.github.io/pdf/2018_Ruegg_et_al_EcolLetters.pdf
+for inspiration of visualizing LFMM results and next steps for Genomic Vulnerability Index
