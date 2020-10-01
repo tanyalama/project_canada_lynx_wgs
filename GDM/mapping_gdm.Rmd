@@ -1,0 +1,354 @@
+---
+title: "mapping_gdm"
+author: "Tanya Lama"
+date: "9/23/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(gdm)
+library(raster)
+library(rgdal)
+#library(lfmm)
+#library(LEA)
+library(rworldmap)
+library(vegan)
+```
+#Import our gdm objects from R (cluster)
+These were generated using the gdm.Rmd script on the cluster. The gdm object is from current (1970-2000) climate data. 
+```{r}
+load("/Users/tanyalama/Box/project_canada_lynx_wgs/R_canada_lynx_wgs/gdm/gdm_model.rda")
+```
+
+#Prepare clim.layer.crop
+These are the same instructions from LFMM 
+```{r}
+clim.list.current <- dir("/Users/tanyalama/Box/project_canada_lynx_wgs/R_canada_lynx_wgs/LFMM (tlama@umass.edu)/climate_data/current_wc2.1_10m_bio", full.names=T, pattern='.tif')  #makes list of file paths for each layer
+clim.layer.current <- stack(clim.list.current)  #stacks the layers into a single object "RasterStack"
+
+#We can view the climate data layers as maps using the plot function
+#pdf("clim.layer.pdf") #only if you are on cluster and want to print as a pdf
+#plot(clim.layer.current) #works
+#dev.off() #only if you're on the cluster
+
+#Crop the climate layers to the study area of interest. I defined the minimum and maximum longitude and minimum and maximum latitude, then used the crop function.
+extent <- c(-80, -50, 40, 60) 
+clim.layer.crop <- crop(clim.layer.current, extent)
+
+#Then plot the cropped climate layer to check
+#plot(clim.layer) #worldwide)
+plot(clim.layer.crop.future$wc2.1_10m_bio_6) #one variable at the study area looks good
+```
+#Mapping Current gdm
+Finally, we can map the results by transforming the climate data layers (clim.layer.crop) based on the modeled results (gdm), and using PCA to covert to a color scale.
+```{r}
+clim.trans <- gdm.transform(gdm, clim.layer.crop)
+clim.rast <- na.omit(getValues(clim.trans))
+
+pca <- prcomp(clim.rast)
+pca.rast <- predict(clim.trans, pca, index=1:3)
+pca.rast[[1]] <- (pca.rast[[1]]-pca.rast[[1]]@data@min) / (pca.rast[[1]]@data@max-pca.rast[[1]]@data@min)*255
+pca.rast[[2]] <- (pca.rast[[2]]-pca.rast[[2]]@data@min) / (pca.rast[[2]]@data@max-pca.rast[[2]]@data@min)*255
+pca.rast[[3]] <- (pca.rast[[3]]-pca.rast[[3]]@data@min) / (pca.rast[[3]]@data@max-pca.rast[[3]]@data@min)*255
+
+par(mfrow=c(1,1))
+plotRGB(pca.rast, r=1, g=2, b=3, bgalpha=0)
+
+can1<-getData('GADM', country="CAN", level=1) # provinces
+us1 <- getData('GADM', country="USA", level=1)
+
+theseJurisdictions <- c("Québec", "Nova Scotia", "New Brunswick", "Newfoundland and Labrador", "Ontario")
+theseUSJurisdictions <- c("Maine", "New Hampshire", "Vermont", "Massachusetts", "Connecticut", "New York")
+plot(can1[can1$NAME_1 %in% theseJurisdictions, ], border="black", cex=0.4,
+    col=NA, add=TRUE) +
+plot(us1[us1$NAME_1 %in% theseUSJurisdictions, ], border="black", cex=0.4,
+    col=NA , add=TRUE) 
+
+#Need to add points
+#points(clim.points.current$Longitude,clim.points.current$Latitude, pch=16, col="black")
+```
+
+#Import our gdm.future object from R (cluster)
+This gdm was generated using future (2061-2080) climate data. Same variables from WorldClim, just projected under SSP2. 
+```{r}
+load("/Users/tanyalama/Box/project_canada_lynx_wgs/R_canada_lynx_wgs/gdm/gdm_model_future.rda")
+```
+#Prepare clim.layer.crop.future
+These are the same instructions from LFMM 
+```{r}
+clim.list.future <- dir("/Users/tanyalama/Box/project_canada_lynx_wgs/R_canada_lynx_wgs/LFMM (tlama@umass.edu)/climate_data/future_ssp2.45/2061-2080/", full.names=T, pattern='.tif')  #makes list of file paths for each layer
+clim.layer.future <- stack(clim.list.future)  #stacks the layers into a single object "RasterStack"
+
+#We can view the climate data layers as maps using the plot function
+#pdf("clim.layer.pdf") #only if you are on cluster and want to print as a pdf
+#plot(clim.layer.future) #works
+#dev.off() #only if you're on the cluster
+
+#Crop the climate layers to the study area of interest. I defined the minimum and maximum longitude and minimum and maximum latitude, then used the crop function.
+extent <- c(-80, -50, 40, 60) 
+clim.layer.crop.future <- crop(clim.layer.future, extent)
+
+#Then plot the cropped climate layer to check
+#plot(clim.layer) #worldwide)
+#plot(clim.layer.crop.future) #one variable at the study area looks good
+```
+#Mapping Current gdm
+Finally, we can map the results by transforming the climate data layers (clim.layer.crop) based on the modeled results (gdm), and using PCA to covert to a color scale.
+
+##this may actually be the one we want...
+```{r}
+clim.trans <- gdm.transform(gdm.future, clim.layer.crop.future)
+clim.rast <- na.omit(getValues(clim.trans))
+
+pca <- prcomp(clim.rast)
+pca.rast <- predict(clim.trans, pca, index=1:3)
+pca.rast[[1]] <- (pca.rast[[1]]-pca.rast[[1]]@data@min) / (pca.rast[[1]]@data@max-pca.rast[[1]]@data@min)*255
+pca.rast[[2]] <- (pca.rast[[2]]-pca.rast[[2]]@data@min) / (pca.rast[[2]]@data@max-pca.rast[[2]]@data@min)*255
+pca.rast[[3]] <- (pca.rast[[3]]-pca.rast[[3]]@data@min) / (pca.rast[[3]]@data@max-pca.rast[[3]]@data@min)*255
+
+par(mfrow=c(1,1))
+plotRGB(pca.rast, r=1, g=2, b=3, bgalpha=0)
+
+can1<-getData('GADM', country="CAN", level=1) # provinces
+us1 <- getData('GADM', country="USA", level=1)
+
+theseJurisdictions <- c("Québec", "Nova Scotia", "New Brunswick", "Newfoundland and Labrador", "Ontario")
+theseUSJurisdictions <- c("Maine", "New Hampshire", "Vermont", "Massachusetts", "Connecticut", "New York")
+plot(can1[can1$NAME_1 %in% theseJurisdictions, ], border="black", cex=0.4,
+    col=NA, add=TRUE) +
+plot(us1[us1$NAME_1 %in% theseUSJurisdictions, ], border="black", cex=0.4,
+    col=NA , add=TRUE) 
+
+#Need to add points
+points(clim.points.current$Longitude,clim.points.current$Latitude, pch=16, col="black")
+```
+
+#Mapping future (predicted) gdm
+```{r}
+clim.trans <- gdm.transform(gdm.future, clim.layer.crop.future)
+clim.rast <- na.omit(getValues(clim.trans))
+
+pca <- prcomp(clim.rast)
+pca.rast <- predict(clim.trans, pca, index=1:3)
+pca.rast[[1]] <- (pca.rast[[1]]-pca.rast[[1]]@data@min) / (pca.rast[[1]]@data@max-pca.rast[[1]]@data@min)*255
+pca.rast[[2]] <- (pca.rast[[2]]-pca.rast[[2]]@data@min) / (pca.rast[[2]]@data@max-pca.rast[[2]]@data@min)*255
+pca.rast[[3]] <- (pca.rast[[3]]-pca.rast[[3]]@data@min) / (pca.rast[[3]]@data@max-pca.rast[[3]]@data@min)*255
+
+#par(mfrow=c(1,1))
+plotRGB(pca.rast, r=1, g=2, b=3, bgalpha=0)
+
+#can1<-getData('GADM', country="CAN", level=1) # provinces
+#us1 <- getData('GADM', country="USA", level=1)
+#us2 <- getData('GADM', country="USA", level=2)
+
+plot(can1[can1$NAME_1 %in% theseJurisdictions, ], border="black", cex=0.4,
+    col=NA, add=TRUE) +
+plot(us1[us1$NAME_1 %in% theseUSJurisdictions, ], border="black", cex=0.4,
+    col=NA , add=TRUE) 
+
+#points(clim.points.future$Longitude,clim.points.future$Latitude, pch=16, col="black")
+
+```
+
+
+# Prediction biological change through time
+Environmental data can be extracted directly from rasters, assuming x-y coordinates of sites are provided in either a site-species table (table type 1) or as a x-y species list (table type 2). The formatsitepair function assumes that the coordinates of the sites are in the same coordinate system as the raster layers.
+```{r}
+# environmental raster data
+rastFile <- dir("/Users/tanyalama/Box/project_canada_lynx_wgs/R_canada_lynx_wgs/LFMM (tlama@umass.edu)/climate_data/current_wc2.1_10m_bio", full.names=T, pattern='.tif')  
+envRast <- stack(rastFile) 
+
+snp.dist.1<- read.table("/Users/tanyalama/Box/project_canada_lynx_wgs/R_canada_lynx_wgs/gdm/snp.dist.1", header = T) #something is weird about the column names
+colnames(snp.dist.1)<- c("ID","0_L155.variant4.variant2","0_LIC11.variant4.variant2","0_LIC20.variant4.variant2","0_LIC23.variant4.variant2","0_LIC24.variant4.variant2","0_LIC27B.variant5.variant2","0_LIC28.variant5.variant2","0_LIC31.variant5.variant2","0_LIC32.variant5.variant2","0_LIC36.variant5.variant2","0_LIC46.variant5.variant2","0_LIC47.variant5.variant2","0_LIC48.variant6.variant2","0_LIC54.variant6.variant2","0_LIC57.variant6.variant2","0_LIC60.variant6.variant2","0_LIC8.variant4.variant2","0_LIC9.variant4.variant2","0_LIT2.variant6.variant2","0_LIT5.variant6.variant2","0_LRK10.variant6.variant2","0_LRK11.variant7.variant2","0_LRK12.variant7.variant2","0_LRK13.variant7.variant2","0_LRK17.variant7.variant2","0_LRK22.variant7.variant2","0_a109.variant.variant.variant2","0_a182.variant.variant.variant2","0_a202.variant.variant.variant2","0_a33.variant.variant.variant2","0_a475.variant.variant.variant2","0_a494.variant.variant.variant2","0_a507.variant.variant.variant2","0_a697.variant","0_a772.variant","0_a794.variant","0_a803.variant","0_a818.variant","0_a857.variant","0_b114.variant","0_b124.variant2.variant.variant2","0_b13.variant2.variant2","0_b188.variant2.variant.variant2","0_b23.variant2.variant.variant2","0_b276.variant2.variant.variant2","0_b554.variant2.variant.variant2","0_b90.variant2.variant.variant2","0_c165.variant2.variant.variant2","0_c323.variant2.variant2","0_c548.variant2.variant2","0_cb15.variant2.variant2","0_cb42.variant2.variant2","0_cb7.variant2.variant2","0_f264.variant2.variant2","0_f457.variant3.variant2","0_fha_024.variant3.variant2","0_fha_042.variant3.variant2","0_fha_043.variant3.variant2","0_l09_003.variant3.variant2","0_l09_007.variant3.variant2","0_l09_015.variant3.variant2")
+
+#We only need species, site, Long, Lat for sppTab
+sppTab<- read.table("/Users/tanyalama/Box/project_canada_lynx_wgs/R_canada_lynx_wgs/gdm/sppTab")
+
+gdmTab.rast <- formatsitepair(sppTab, bioFormat=2, XColumn="Longitude", YColumn="Latitude", sppColumn="species", siteColumn="site",predData=envRast) 
+
+# make sure there are no NA values
+# e.g., if some sites do not intersect the rasters
+sum(is.na(gdmTab.rast))
+## [1] 0
+gdmTab.rast <- na.omit(gdmTab.rast)
+```
+# fit a new gdm using a table with climate data only (to match rasters)
+```{r}
+gdm.rast <- gdm(gdmTab.rast, geo=T)
+
+# climate change raster stack
+rastFile.future <-dir("/Users/tanyalama/Box/project_canada_lynx_wgs/R_canada_lynx_wgs/LFMM (tlama@umass.edu)/climate_data/future_ssp2.45/2061-2080/", full.names=T, pattern='.tif')
+futRasts <- stack(rastFile.future) 
+
+names(futRasts) <- c( "wc2.1_10m_bio_1", "wc2.1_10m_bio_2",  "wc2.1_10m_bio_3",  "wc2.1_10m_bio_4",  "wc2.1_10m_bio_5", "wc2.1_10m_bio_6",  "wc2.1_10m_bio_7",  "wc2.1_10m_bio_8",  "wc2.1_10m_bio_9", "wc2.1_10m_bio_10", "wc2.1_10m_bio_11", "wc2.1_10m_bio_12", "wc2.1_10m_bio_13","wc2.1_10m_bio_14", "wc2.1_10m_bio_15", "wc2.1_10m_bio_16", "wc2.1_10m_bio_17", "wc2.1_10m_bio_18","wc2.1_10m_bio_19")
+
+#This is the only way I've found to reorder stacks
+futRasts<- stack(futRasts[[1]],futRasts[[10]], futRasts[[11]],futRasts[[12]], futRasts[[13]],futRasts[[14]], futRasts[[15]],futRasts[[16]], futRasts[[17]],futRasts[[18]], futRasts[[19]],futRasts[[2]], futRasts[[3]],futRasts[[4]], futRasts[[5]],futRasts[[6]], futRasts[[7]],futRasts[[8]], futRasts[[9]])
+
+timePred <- predict.gdm(gdm.rast, envRast, time=T, predRasts=futRasts)
+#Predicted magnitude of biological change through time
+plot(timePred, xlim=c(-80, -50), ylim=c(40, 60))
+```
+#Let's try with some fake climate data
+This worked, and mapped correctly, so it seems like our climate data might be the problem? We can try a smaller subset of data (PCs or maybe just one climate variable?). Or try the clim.layer.crop
+```{r}
+futRasts2 <- envRast
+##reduce winter precipitation by 25% & increase temps
+futRasts2[[3]] <- futRasts2[[3]]*0.75
+futRasts2[[4]] <- futRasts2[[4]]+2
+futRasts2[[5]] <- futRasts2[[5]]+3
+
+timePred <- predict.gdm(gdm.rast, envRast, time=T, predRasts=futRasts2)
+#Predicted magnitude of biological change through time
+plot(timePred, xlim=c(-80, -50), ylim=c(40, 60)) #this is what it should look like
+```
+
+
+# Genetic offset with all variables
+pred<- predict.gdm(gdm, clim.layer.crop, time=T, predRasts = climcropfut) # offset
+plot(pred,col = pal(50), main="All BioClim Variables")
+
+# Genetic offset with just a few relevant variables (BIO1, 4, 6, 11, 15, 19)
+We decided that the genetic offset map with all bioclim variables was more informative and provided more fine-grain patterns in offset
+```{r}
+#load out variable selection model from R
+load("/Users/tanyalama/Box/project_canada_lynx_wgs/R_canada_lynx_wgs/gdm/gdm_variable_selection_model.rda")
+
+#prepare raster for current climate, with selected bioclimatic variables (1,4,6,11,15,19)
+clim.layer.selection<- stack(clim.list.current[[1]],clim.list.current[[14]], clim.list.current[[16]],clim.list.current[[3]], clim.list.current[[7]],clim.list.current[[11]])
+#crop
+clim.layer.crop.selection <- crop(clim.layer.selection, extent)
+#plot
+plot(clim.layer.crop.selection) #looks good
+
+#prepare raster for future climate
+climcropfut.selection<- stack(climcropfut[[1]],climcropfut[[14]], climcropfut[[16]],climcropfut[[3]], climcropfut[[7]],climcropfut[[11]])
+#crop
+climcropfut.selection.crop <- crop(climcropfut.selection, extent)
+#plot
+plot(climcropfut.selection.crop)
+
+#genetic offset bewteen current and future, using selected bioclim variables
+pred.selection <- predict.gdm(gdm_var_selection, clim.layer.crop.selection, time=T, predRasts = climcropfut.selection.crop) # offset
+
+#plot genetic
+pal <- colorRampPalette(c("white", "yellow","orange", "red", "firebrick", "maroon"))
+
+plot(pred.selection, col = pal(50))
+
+pal <- colorRampPalette(c("white", "yellow","orange", "red", "firebrick", "maroon"))
+
+#Mask and crop our genetic offset raster layer using the species distribution 
+sppdist  <- readOGR('/Users/tanyalama/Box/project_canada_lynx_wgs/R_canada_lynx_wgs/study_area_map/redlist_species_data_9e1bb103-c4ae-4c7e-8753-13cf4e989315/data_0.shp')
+
+plot(pred, col = pal(50))
+plot(sppdist, add=TRUE)
+
+masked <- mask(x = pred, mask = sppdist, col = pal(50))
+plot(masked, col = pal(50))
+
+cropped <- crop(x = masked, y = extent(sppdist))
+
+par(bty = 'n') xaxt = "n", yaxt = "n"
+par()
+par(xaxt = "n")
+plot(cropped, col = pal(50))
+
+plot(can1[can1$NAME_1 %in% theseJurisdictions, ], border="black", cex=0.2,
+    col=NA, add=TRUE) +
+plot(us1[us1$NAME_1 %in% theseUSJurisdictions, ], border="black", cex=0.2,
+    col=NA , add=TRUE) 
+plot(sppdist, col=NA, border="black", cex=0.1, add=TRUE)
+```
+#This worked! Predicting biological change through time. 
+Estimate the magnitude of expected change in biological composition in response to environmental change.
+This was another attempt at genetic offset, but I don't think it works because it is using bioFormat=2 without the snp data. I think this is a good method of measuring environmental change between current and future. e.g. where is climate changing fastest geographically 
+```{r}
+trialgdmTab.rast <- formatsitepair(sppTab, bioFormat=2, XColumn="Longitude", YColumn="Latitude", sppColumn="species", siteColumn="site",predData=clim.layer.crop.selection)  #current rast input
+
+trialgdm.rast <- gdm(trialgdmTab.rast, geo=T) #gdm on current
+plot(trialgdm.rast)
+climcropfut<- clim.layer.crop.future
+names(climcropfut)<- c( "wc2.1_10m_bio_1", "wc2.1_10m_bio_2",  "wc2.1_10m_bio_3",  "wc2.1_10m_bio_4",  "wc2.1_10m_bio_5", "wc2.1_10m_bio_6",  "wc2.1_10m_bio_7",  "wc2.1_10m_bio_8",  "wc2.1_10m_bio_9", "wc2.1_10m_bio_10", "wc2.1_10m_bio_11", "wc2.1_10m_bio_12", "wc2.1_10m_bio_13","wc2.1_10m_bio_14", "wc2.1_10m_bio_15", "wc2.1_10m_bio_16", "wc2.1_10m_bio_17", "wc2.1_10m_bio_18","wc2.1_10m_bio_19")
+
+climcropfut<- stack(climcropfut[[1]],climcropfut[[10]], climcropfut[[11]],climcropfut[[12]], climcropfut[[13]],climcropfut[[14]], climcropfut[[15]],climcropfut[[16]], climcropfut[[17]],climcropfut[[18]], climcropfut[[19]],climcropfut[[2]], climcropfut[[3]],climcropfut[[4]], climcropfut[[5]],climcropfut[[6]], climcropfut[[7]],climcropfut[[8]], climcropfut[[9]])
+
+trialtimePred <- predict.gdm(trialgdm.rast, clim.layer.crop.selection, time=T, predRasts=climcropfut.selection.crop)
+
+plot(trialtimePred, col = pal(50)) #north of the St. Lawrence River is actually projected to change most quickly, oddly enough?
+
+can1<-getData('GADM', country="CAN", level=1) # provinces
+us1 <- getData('GADM', country="USA", level=1)
+
+theseJurisdictions <- c("Québec", "Nova Scotia", "New Brunswick", "Newfoundland and Labrador", "Ontario")
+theseUSJurisdictions <- c("Maine", "New Hampshire", "Vermont", "Massachusetts", "Connecticut", "New York")
+plot(can1[can1$NAME_1 %in% theseJurisdictions, ], border="black", cex=0.4,
+    col=NA, add=TRUE) +
+plot(us1[us1$NAME_1 %in% theseUSJurisdictions, ], border="black", cex=0.4,
+    col=NA , add=TRUE) 
+
+#Need to add points
+points(clim.points.current$Longitude,clim.points.current$Latitude, pch=16, col="black")
+
+library(ggplot2)
+library(RColorBrewer)
+
+cols <- (c("blue", "red"))
+pal <- colorRampPalette(cols)
+
+```
+
+##Chapter 3 study area map
+BIO6 = Min Temperature of Coldest Month as the background
+```{r}
+#cold palette
+library(RColorBrewer)
+coldpal<- colorRampPalette(brewer.pal(9,"Blues"))(50)
+
+coldpal <- colorRampPalette(c("steelblue", "skyblue", "powderblue","paleturquoise","lightcyan", "azure"))
+
+plot(clim.layer.crop.selection$wc2.1_10m_bio_6, col = coldpal) #coldpal(50) without RColorBrewer
+
+#add borders
+par(bty = 'n',xaxt = "n", yaxt = "n") 
+
+plot(can1[can1$NAME_1 %in% theseJurisdictions, ], border="black", cex=0.2,col=NA, add=TRUE) +
+plot(us1[us1$NAME_1 %in% theseUSJurisdictions, ], border="black", cex=0.2,col=NA , add=TRUE) 
+
+#add points
+lynx<-read.csv("/Users/tanyalama/Box/project_canada_lynx_wgs/R_canada_lynx_wgs/study_area_map/WGS_locations_WGS84.csv",header=TRUE)
+lynx<- lynx[7:68,]
+ME1998<- lynx$sample=="ME1998"
+lynx= lynx[!ME1998,] #dropped
+
+spdf<-data.frame(samples=lynx$sample,y=lynx$lat,x=lynx$long, class=lynx$pop)
+coordinates(spdf)<-c("x","y") #retrieve the spatial coordinates from the lynx dataset
+#spdfpr<- spTransform(spdf, newProj)
+#proj4string(spdf)<-CRS("+init=epsg:4326") #sets projection attributes on spatial data #Here we have WGS84
+#EPSG:3347	NAD83 / Statistics Canada Lambert	Lambert Conic Conformal (2SP)
+#spdftrans<-spTransform(spdf, CRS("+proj=poly +lat_0=0 +lon_0=-100 +x_0=0 +y_0=0 +ellps=WGS84 +datum=WGS84 +units=m +no_defs")) #transform to WGS 84
+
+palette(c("orange", "lightgreen", "violet")) #matches our admixture plot
+plot(spdf,pch=20,, cex= 0. col=as.factor(spdf$class), add=TRUE) #palette=(rainbow(5))
+
+dF <- read.csv("/Users/tanyalama/Box/project_canada_lynx_wgs/R_canada_lynx_wgs/SNPRelate/k3qmatrix.csv")
+
+mapPies( dF,nameX="Longitude", nameY="Latitude", nameZs=c('V1','V2','V3'), xlim=c(-80, -50), ylim=c(40, 60), borderCol = NA, oceanCol = NA, add = TRUE, zColours = c("orange", "violet", "lightgreen"), addCatLegend = FALSE, ratio = 1, symbolSize=.6, cex=0.01) #nicer with smaller symbol size
+
+```
+#Transforming predictos and visualizing biological patterns
+```{r}
+#Environmental Data is clim.points
+envTrans<- clim.points
+envTrans[1:3,]
+tabTrans<- gdm.transform(gdm, envTrans)
+#now scaled to biological importance
+tabTrans[1:3, ]
+
+# transform climate rasters & plot pattern
+rastTrans <- gdm.transform(gdm.rast, envRast)
+#plot(rastTrans)
+
+  
+  bioData=snp.dist.1, bioFormat=3, predData=clim.points.future
