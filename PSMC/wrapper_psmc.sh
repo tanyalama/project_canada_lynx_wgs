@@ -9,4 +9,5 @@ do
 psmc -p "4+25*2+4+6" -o ${i}.psmc ${i}.psmcfa
 done
 
-#bsub -q long -W 72:00 -R rusage[mem=8000] -n 1 "psmc -p "wrapper_psmc.sh"
+#bsub -q long -W 48:00 -R rusage[mem=8000] -n 1 "./wrapper_psmc.sh"
+#2502 18h for 9 samples
