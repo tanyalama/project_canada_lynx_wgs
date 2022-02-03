@@ -12,7 +12,7 @@ knitr::opts_chunk$set(echo = TRUE)
 #Read in the data
 You should see 0.00 across the diagonal and the nrow and ncol should be equal to eachother and equal to the n samples you have (n=61). .diffs does not have any row and col names. 
 ```{r}
-diffs<- read.table("/project/uma_lisa_komoroske/Tanya/Rgenomics/mLynCan4_v1.p_lynxonly/6SV_unfiltered_SNPs.diffs")
+diffs<- read.table("/project/uma_lisa_komoroske/Tanya/Rgenomics/mLynCan4_v1.p_lynxonly/6SV_unfiltered_SNPs.diffs") #saved on github as snps.diffs
 diffs
 ```
 #Mapping -- we had to do this section locally because of dependency issues
