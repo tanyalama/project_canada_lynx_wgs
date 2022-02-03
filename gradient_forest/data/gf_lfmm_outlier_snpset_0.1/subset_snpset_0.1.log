@@ -1,0 +1,13 @@
+
+VCFtools - UNKNOWN
+(C) Adam Auton and Anthony Marcketta 2009
+
+Parameters as interpreted:
+	--vcf /project/uma_lisa_komoroske/Tanya/scripts/LFMM/outlier_LD_pruned_snps_PCs/current_climate_results/subset_snpset_0.1.vcf
+	--012
+	--out subset_snpset_0.1
+
+After filtering, kept 61 out of 61 Individuals
+Writing 012 matrix files ... Done.
+After filtering, kept 1391 out of a possible 1391 Sites
+Run Time = 0.00 seconds

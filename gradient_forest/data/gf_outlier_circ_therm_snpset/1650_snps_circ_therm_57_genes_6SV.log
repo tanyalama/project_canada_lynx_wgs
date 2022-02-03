@@ -1,0 +1,13 @@
+
+VCFtools - UNKNOWN
+(C) Adam Auton and Anthony Marcketta 2009
+
+Parameters as interpreted:
+	--vcf 1650_snps_circ_therm_57_genes_6SV.vcf
+	--012
+	--out 1650_snps_circ_therm_57_genes_6SV
+
+After filtering, kept 61 out of 61 Individuals
+Writing 012 matrix files ... Done.
+After filtering, kept 3394 out of a possible 3394 Sites
+Run Time = 0.00 seconds
