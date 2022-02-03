@@ -1,0 +1,77 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+We're going to try two methods for estimating Ne. One is NeEstimator and one is ldNE (Waples). 
+
+1. NeEstimator
+First we need to convert our VCF to GenePop format. It looks like there is a function for format conversion in the package radiator. We will try that with our clean SNP set
+```{r}
+setwd("/project/uma_lisa_komoroske/Tanya/scripts/SNeP/NeEstimator")
+
+if (!requireNamespace("BiocManager", quietly = TRUE))
+install.packages("BiocManager")
+BiocManager::install()
+
+BiocManager::install("SeqVarTools")
+require(SeqVarTools)
+
+#install.packages("remotes")
+remotes::install_github("thierrygosselin/radiator")
+require(radiator)
+
+BiocManager::install("adegenet")
+require(adegenet)
+
+if (!require('devtools')) install.packages('devtools')
+require(devtools)
+#needs ‘apex’, ‘adegenet’, ‘copula’, ‘pegas’, ‘rmetasim’ for stratag
+devtools::install_github('ericarcher/strataG', build_vignettes = TRUE)
+
+```
+Our VCFs:
+PopGenome/VCF/snpset_LD0.2_MAF0.05_missing_0.05/snpset_LD0.2_MAF0.05_missing_0.05.vcf OR 
+/project/uma_lisa_komoroske/Tanya/scripts/SNPRelate/lynx.gds
+```{r} 
+#strata
+
+INDIVIDUALS<- c("L155", "LIC11", "LIC20", "LIC23", "LIC24", "LIC27B", "LIC28", "LIC31", "LIC32", "LIC36", "LIC46", "LIC47", "LIC48", "LIC54", "LIC57", "LIC60", "LIC8", "LIC9", "LIT2", "LIT5", "LRK10", "LRK11", "LRK12", "LRK13", "LRK17", "LRK22", "a109", "a182", "a202", "a33", "a475", "a494", "a507", "a697", "a772", "a794", "a803", "a818", "a857", "b114", "b124", "b13", "b188", "b23", "b276","b554", "b90", "c165", "c323", "c548", "cb15", "cn42", "cb7", "f264", "f457", "fha_024", "fha_042", "fha_043", "l09_003", "l09_007", "l09_015")
+POP_ID<-as.factor(c(3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,1,1,2,2,3,3,1,3,1,1,3,1,1,1,1,3,2,1,3,1,1,3,3,3,3,1,1,1,1,1,3,1,3))
+strata<- cbind(INDIVIDUALS,POP_ID)
+write.csv(strata, "strata.csv", sep="/t")
+strata<- read.csv("strata.csv", sep=",")
+new.strata <- radiator::read_strata(strata = strata) #this worked
+strata.info <- radiator::read_strata(strata)
+
+radiator::genomic_converter(
+  data=c("/project/uma_lisa_komoroske/Tanya/scripts/SNPRelate/lynx.gds"),
+  strata = strata,
+  output =c("genepop"),
+  parallel.core = parallel::detectCores() - 1,
+  verbose = TRUE)
+
+/project/uma_lisa_komoroske/Tanya/scripts/PopGenome/VCF/snpset_LD0.2_MAF0.05_missing_0.05/
+/project/uma_lisa_komoroske/Tanya/scripts/SNPRelate/lynx.gds
+
+detect_genomic_format()
+
+radiator::detect_genomic_format(data = "/project/uma_lisa_komoroske/Tanya/scripts/PopGenome/VCF/snpset_LD0.2_MAF0.05_missing_0.05/snpset_LD0.2_MAF0.05_missing_0.05.vcf")
+
+snowcrab <- radiator::genomic_converter(data = "/project/uma_lisa_komoroske/Tanya/scripts/PopGenome/VCF/snpset_LD0.2_MAF0.05_missing_0.05/snpset_LD0.2_MAF0.05_missing_0.05.vcf", strata = strata, output = c("genepop"))
+
+snowcrab <- genomic_converter(data = "/project/uma_lisa_komoroske/Tanya/scripts/PopGenome/VCF/snpset_LD0.2_MAF0.05_missing_0.05/snpset_LD0.2_MAF0.05_missing_0.05.vcf", strata = strata,
+                   output = c("genepop"))
+
+
+clean_snps_genepop <- genomic_converter(genofile, output = c("genepop"))
+
+#Get the content of the object created using:
+names(snowcrab)
+#To isolate the genlight object (without imputation):
+genlight <- snowcrab$genlight
+
+
+
+```
+
