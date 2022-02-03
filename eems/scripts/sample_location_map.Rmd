@@ -1,0 +1,147 @@
+---
+title: "mapping_lynx_WGS_samples"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+## Mapping Lynx WGS Data ##
+
+library(sp) #-- need
+library(r2dRue)
+library(adehabitatHR)
+library(rgdal) #-- need
+library(ade4)
+library(deldir)
+library(adehabitatMA)
+library(adehabitatLT)
+library(shapefiles)
+library(spatstat)
+library(rgeos)
+#library(gpclib)
+library(maptools)
+library(plyr)
+require(ggmap)
+require(rgeos)
+
+setwd()
+source('F:/work/movement/biostats.R')
+```
+# Plotting the outline of the US/Canada, provinces, and in particular the St. Lawrence River
+```{r}
+library(maps)
+library(mapproj)
+library(mapdata)
+library(rgeos)
+library(maptools)
+library(sp)
+library(raster)
+library(rgdal)
+
+can0<-getData('GADM', country="CAN", level=0) # Canada
+can1<-getData('GADM', country="CAN", level=1) # provinces
+# can2<-getData('GADM', country="CAN", level=2) # counties
+  
+plot(can1)    
+spplot(can1, "NAME_1") # colors the provinces and provides
+                       # a color-coded legend for them
+can1$NAME_1            # returns names of provinces/territories
+# us0 <- getData('GADM', country="USA", level=0)
+us1 <- getData('GADM', country="USA", level=1)
+# us2 <- getData('GADM', country="USA", level=2)
+plot(us1)              # state boundaries split at 
+                       # the dateline
+us1$NAME_1             # returns names of the states + DC
+spplot(us1, "ID_1")
+spplot(us1, "NAME_1")  # color codes states and
+                       # provides their names
+#
+# Here attempting unsuccessfully to combine U.S. and Canada on one map.
+# Attempts at selecting given states or provinces have been unsuccessful.
+#
+plot(us1,can1)
+us.can1 <- rbind(us1,can1)
+```
+# Try this script 
+#To plot multiple SpatialPolygons objects on the same device, one approach is to specify the geographic extent you wish to plot first, and then using plot(..., add=TRUE). This will add to the map only those points that are of interest.
+
+Plotting using a projection, (e.g. a polyconic projection) requires first using the spTransform() function in the rgdal package to make sure all the layers are in the same projection.
+```{r}
+##Call a new plot
+plot.new()
+## Specify a geographic extent for the map
+## by defining the top-left and bottom-right geographic coordinates
+mapExtent <- rbind(c(-74, 59), c(-60, 40))#final set: (c(-74, 59), c(-61, 40))
+#plot(mapExtent, col=NA, pch="o", add=TRUE)#trouble-shooting how bit to makethe extent
+
+## Specify the required projection using a proj4 string
+## Use http://www.spatialreference.org/ to find the required string
+## Polyconic for North America
+newProj <- CRS("+proj=poly +lat_0=0 +lon_0=-100 +x_0=0 
+            +y_0=0 +ellps=WGS84 +datum=WGS84 +units=m +no_defs") #this should be same/similar to "+init=epsg:4326" which is what we have for the points above
+
+## Project the map extent (first need to specify that it is longlat) 
+mapExtentPr <- spTransform(SpatialPoints(mapExtent, 
+                  proj4string=CRS("+proj=longlat")),
+                  newProj)
+plot(mapExtentPr, pch=NA) #try this to make St Lawrence River
+#plot(mapExtentPr,pch="o", add=TRUE) #visualize using points the topleft and bottomright corners of the extent
+
+## Project other layers
+can0Pr <- spTransform(can0, newProj)
+can1Pr <- spTransform(can1, newProj)
+us1Pr <- spTransform(us1, newProj) 
+
+## Plot each projected layer, beginning with the projected extent
+#plot(can0Pr, border="black", col=NA, add=TRUE)
+#plot(can1Pr, border=NA, col="lightgrey", add=TRUE)
+#plot(us1Pr, border="black", col=NA, add=TRUE)
+
+#Adding other features to the map, such as highlighting jurisdictions of interest, can easily be done using the same approach:
+
+## Highlight provinces and states of interest
+theseJurisdictions <- c("Québec", "Nova Scotia", "New Brunswick", "Newfoundland and Labrador")
+theseUSJurisdictions <- c("Maine")
+borderingJurisdictions<- c("Ontario")
+borderingUSJurisdictions<- c("New Hampshire", "Vermont", "Massachusetts", "Connecticut", "New York")
+
+p <- plot(can1Pr[can1Pr$NAME_1 %in% theseJurisdictions, ], border="black", 
+    col="gray90", add=TRUE) + 
+  plot(us1Pr[us1Pr$NAME_1 %in% theseUSJurisdictions, ], border="black", 
+    col="gray90", add=TRUE) +
+  plot(can1Pr[can1Pr$NAME_1 %in% borderingJurisdictions, ], border="black", cex=0.4, 
+    col="white", add=TRUE) +
+  plot(us1Pr[us1Pr$NAME_1 %in% borderingUSJurisdictions, ], border="black", cex=0.4, 
+    col="white", add=TRUE)
+
+# Try adding points to the map, from our lynx dataset
+lynx<-read.csv("home/tl50a/EEMS/WGS_locations_WGS84.csv",header=TRUE)
+
+spdf<-data.frame(samples=lynx$sample,y=lynx$lat,x=lynx$long, class=lynx$pop)
+coordinates(spdf)<-c("x","y") #retrieve the spatial coordinates from the lynx dataset
+spdfpr<- spTransform(spdf, newProj)
+proj4string(spdf)<-CRS("+init=epsg:4326") #sets projection attributes on spatial data #Here we have WGS84
+#EPSG:3347	NAD83 / Statistics Canada Lambert	Lambert Conic Conformal (2SP)
+spdftrans<-spTransform(spdf, CRS("+proj=poly +lat_0=0 +lon_0=-100 +x_0=0 
+            +y_0=0 +ellps=WGS84 +datum=WGS84 +units=m +no_defs")) #transform to WGS 84
+
+palette(c("orange", "violet", "lightgreen", "tomato", "blueviolet")) #matches our admixture plot
+plot(spdftrans,pch=16, col=as.factor(spdftrans$class), add=TRUE) #palette=(rainbow(5))
+
+legend("bottomright", legend=c("N St. Lawrence River", "Newfoundland", "S St. Lawrence River", "Bobcat", "Bobcat-Lynx Hybrid"), pch=16, col=c("orange", "violet", "lightgreen", "tomato", "blueviolet"), text.col="black", cex = 0.6, border=FALSE, box.col=NA, inset=0.1)
+
+#Adding a much larger map for a map "inlay" on top
+mapExtent2 <- rbind(c(-156, 80), c(-68, 19))#final set: (c(-74, 59), c(-61, 40)) mapExtent <- rbind(c(-156, 80), c(-68, 19))
+#plot(mapExtent, col=NA, pch="o", add=TRUE)#trouble-shooting how bit to makethe extent
+
+## Project the map extent (first need to specify that it is longlat) 
+mapExtent2Pr <- spTransform(SpatialPoints(mapExtent, 
+                  proj4string=CRS("+proj=longlat")),
+                  newProj)
+plot(mapExtent2Pr, pch=NA, col="blue")
+plot(can0Pr, border="black", col=NA, add=TRUE)
+
+  
+  
+  
+  

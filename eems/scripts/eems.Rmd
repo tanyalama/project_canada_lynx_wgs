@@ -1,0 +1,86 @@
+---
+title: "EEMS"
+author: "Tanya Lama"
+date: "7/30/2020"
+output: html_document
+---
+#EEMS
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Read in the data
+You should see 0.00 across the diagonal and the nrow and ncol should be equal to eachother and equal to the n samples you have (n=61). .diffs does not have any row and col names. 
+```{r}
+diffs<- read.table("/project/uma_lisa_komoroske/Tanya/Rgenomics/mLynCan4_v1.p_lynxonly/6SV_unfiltered_SNPs.diffs")
+diffs
+```
+#Mapping -- we had to do this section locally because of dependency issues
+Identifying the coordinates for each individual and the habitat layer (".outer") required some packages including rgdal which weren't available here on the cluster, so we did them locally. Moving on, we'll focus on visualizations 
+```{r}
+#Can we get the .outer vertices from the species distribution shapefile? 
+We have a species distribution shapefile that we downloaded from USFWS, that includes US ESA designated critical habitat and the larger species distribution in easterns Canadian provinces adjacent to Maine. Maybe we can use that shapefile to provide the vertices required for .outer. 
+```{r}
+#Read the shapefile into R
+shape <- readOGR("/Users/tanyalama/Box/project_canada_lynx_wgs/R_canada_lynx_wgs/EEMS/IUCN_redlist_Canada_lynx_spp_distribution/data_0.shp")
+coordinates(shape)<-c("x","y") #retrieve the spatial coordinates from the lynx dataset
+spdfpr<- spTransform(shape, newProj)
+proj4string(shape)<-CRS("+init=epsg:4326") #sets projection attributes on spatial data #Here we have WGS84
+#EPSG:3347	NAD83 / Statistics Canada Lambert	Lambert Conic Conformal (2SP)
+sp_dist_shapefile<-spTransform(shape, CRS("+proj=poly +lat_0=0 +lon_0=-100 +x_0=0 
+            +y_0=0 +ellps=WGS84 +datum=WGS84 +units=m +no_defs")) #transform to WGS 84
+plot(sp_dist_shapefile, add=TRUE, col="grey60")
+```
+That looks great. 
+Next, we need to coerce our SpatialPolygonsDataFrama (shape) into lines, then points in a data frame. 
+```{r}
+## Start here for polygons. Coerce to line
+lin <- as(shape, "SpatialLinesDataFrame")  
+## Start here for lines. Coerce to points
+pts <- as.data.frame(as(lin, "SpatialPointsDataFrame")) #this might be all we need since this is a data frame, let's see
+##select just the last two columns which have our x and y information
+print<-pts[,19:20]
+#write.csv(print, "/Users/tanyalama/Box/project_canada_lynx_wgs/R_canada_lynx_wgs/EEMS/IUCN_redlist_Canada_lynx_spp_distribution/EEMS_spp_dist_as_pts.csv")
+#I opened the .csv and reordered the columns and renamed and removed rownames (lazy) 
+```
+We now have our species distribution polygon available as points in a dataframe. We need to transform it as above and plot it to make sure it captures the outline of our original shapefile. 
+```{r}
+outer<- read.csv("/Users/tanyalama/Box/project_canada_lynx_wgs/R_canada_lynx_wgs/EEMS/IUCN_redlist_Canada_lynx_spp_distribution/EEMS_spp_dist_as_pts.csv")
+spdf<-data.frame(y=outer$lat,x=outer$long)
+coordinates(spdf)<-c("x","y") #retrieve the spatial coordinates from the lynx dataset
+spdfpr<- spTransform(spdf, newProj)
+proj4string(spdf)<-CRS("+init=epsg:4326") #sets projection attributes on spatial data #Here we have WGS84
+#EPSG:3347	NAD83 / Statistics Canada Lambert	Lambert Conic Conformal (2SP)
+sp_dist_shapefile_pts<-spTransform(spdf, CRS("+proj=poly +lat_0=0 +lon_0=-100 +x_0=0 
+            +y_0=0 +ellps=WGS84 +datum=WGS84 +units=m +no_defs")) #transform to WGS 84
+plot(sp_dist_shapefile_pts,col="red", add=TRUE) #palette=(rainbow(5))
+
+#maybe we can remove some of these points and limit it to our mapping extent... but the good news is that these samples match up with our points and ourmap!
+```
+While I am glad that sp_dist_shapefile_pts seemed like the right way to go, we ran into a problem because EEMS wants the .outer points listed in counterclockwise fashion with the first and last points listed matching up so as to "close" the circle. This wasn't going to be possible with the sp_dist_shapefile_pts data, because it looked like the points were in no particular order. A quick attempt to "reorganize" the points in counterclockwise order was just a huge headache and I quickly realized it wasn't going to be possible. On to the next attempt: 
+
+#Drawing the ".outer" coordinates in ArcGIS online
+We decided that it would be best to just try trading the outline of our study area in ArcGis and using those coordinates at the input for .outer in EEMS. Ultimately we tried two iterations. One which very precisely followed the outline of our study area (along the banks of the St Lawrence River and the Strait of Belle Isle). However, EEMS wasn't able to properly draw the demes given how the input habitat is disconnected on the East side. On a second iteration, we re-drew the outline with less detail and EEMS was able to use our habitat designation to proceed. 
+Here is a visualization of the "detailed" outline we drew. Let's make sure that the coordinates are in the right projection (WGS84) and that when we transform them, they line up nicely with our other data layers (individuals, the designation of critical habitat and species distribution map (grey), and our geographic outlines of Maine and eastern Canadian provinces).
+```{r}
+outer<- read.csv("/Users/tanyalama/Box/project_canada_lynx_wgs/R_canada_lynx_wgs/EEMS/IUCN_redlist_Canada_lynx_spp_distribution/EEMS_outer_arcgis_pts.csv")
+spdf<-data.frame(y=outer$lat,x=outer$long)
+coordinates(spdf)<-c("x","y") #retrieve the spatial coordinates from the lynx dataset
+spdfpr<- spTransform(spdf, newProj)
+proj4string(spdf)<-CRS("+init=epsg:4326") #sets projection attributes on spatial data #Here we have WGS84
+#EPSG:3347	NAD83 / Statistics Canada Lambert	Lambert Conic Conformal (2SP)
+EEMSpts.outer<-spTransform(spdf, CRS("+proj=poly +lat_0=0 +lon_0=-100 +x_0=0 
+            +y_0=0 +ellps=WGS84 +datum=WGS84 +units=m +no_defs")) #transform to WGS 84
+plot(EEMSpts.outer,col="red", add = TRUE) #palette=(rainbow(5))
+```
+#EEMS Visualizations
+Now that we have EEMS running with out input .coords and .outer files (and .diffs. See my HackMD if you want directions on running bed2diffs). The EEMS results can be visualized with the function eems.plots defined in the R package rEEMSplot. The package is not on CRAN, so install it from source instead. (The code is in the directory plotting.)
+```{r}
+## Part 1: Install rEEMSplots
+## Check that the current directory contains the rEEMSplots source directory
+if (file.exists("/project/uma_lisa_komoroske/bin/eems/plotting/rEEMSplots")) {
+  install.packages("rEEMSplots", repos = NULL, type = "source")
+} else {
+  stop("Move to the directory that contains the rEEMSplots source to install the package.")
+}
+
