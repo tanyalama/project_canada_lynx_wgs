@@ -1,0 +1,485 @@
+---
+title: "gdm"
+author: "Tanya Lama"
+date: "8/7/2020"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+We'll run a generalized dissimilarity model (GDM) to quantify, describe, and map the association between spatial environmental variables (climate data) and genetic variation (SNPs and allele frequencies). 
+
+Refer to Fitzpatrick & Keller (2015) for more detail about concepts and applications and refer to the gdm R package vignette and manual for examples and usage. 
+
+GDM is a distance-based multivariate approach that considers potential non-linear patters in the data. GDM is typically used with allele frequency data based on sample sites (populations) but you can also run GDM on individual-based data and treat each individual as a data point. It's debatable which would be the better approach here. For felids, most of the metrics and analyses we've run have been individual-based.
+
+#Preparing the data (in cluster)
+We need to take our SNP data in VCF format and convert it to a more readable format for R. 
+1. use vcftools to convert the SNPs to 012 format (hom ref, het, hom alt). Here we are using an LD-pruned SNPset prepared by LEA
+```{r}
+#vcftools --gzvcf mLynCan4v1p_filtered_reduced.vcf.gz  --012 --out mLynCan4v1p_filtered_reduced 
+```
+Keep the second to last columns, replace missing (-1) data as NA, etc. then rearrange the list of SNP positions into a single tab-separated row to create a header; then paste the SNP IDs with the header and SNP data. View the resulting file with less -S. 
+When finished copy it to the /gdm folder with cp snp.forR 
+```{r}
+#cut -f2- outlier_loci_circ_therm_genelist_6SV.012 | sed 's/-1/NA/g' >snp.temp 
+
+#tr -d '\t' <outlier_loci_circ_therm_genelist_6SV.012.pos | tr '\n' '\t' | sed 's/[[:space:]]*$//' >header
+
+#paste <(echo "ID" | cat - outlier_loci_circ_therm_genelist_6SV.012.indv) <(echo "" | cat header - snp.temp) > snp.forR
+
+#rm snp.temp header
+```
+#Load the SNP data
+Note: this is the 0.01 outlier set from our LFMM analysis in the /LFMM_subset_snpset_0.1 folder. We can also try this with the full suite of LD-pruned SNPs in /ld_pruned_snps
+
+For clim.points we are using the full suite of 19 bioclimate variables from WorldClim. See LFMM for how we extracted points from the raster stack for our 61 individuals. We can also run this using our synthetic environmental variacles (principal components) but let's try this first. When I discussed this with Brenna she told me that running all of the variables on gdm is standard practice as long as multiple testing is accounted for.
+```{r}
+library(lfmm)
+library(LEA)
+library(qvalue)
+
+setwd("/project/uma_lisa_komoroske/Tanya/scripts/GDM/LFMM_subset_snpset_0.1/")
+
+snp <- read.table("/Volumes/GoogleDrive/My Drive/project_canada_lynx_wgs/R_canada_lynx_wgs/gdm/R_scripts/gdm_ld_pruned_snps/snp.forR", header = T, row.names = 1)
+
+#Making clim.points
+clim.list <- dir("/Users/tanyalama/Box Sync/project_canada_lynx_wgs/R_canada_lynx_wgs/LFMM (tlama@umass.edu)/climate_data/wc2.1_10m_bio", full.names=T, pattern='.tif')  #makes list of file paths for each layer
+clim.layer <-  stack(clim.list)  #stacks the layers into a single object "RasterStack"
+
+#We can view the climate data layers as maps using the plot function
+#pdf("clim.layer.pdf") #only if you are on cluster and want to print as a pdf
+plot(clim.layer) #works
+#dev.off() #only if you're on the cluster
+
+#Load sample names and coordinates
+sample.coord<- read.table("/Users/tanyalama/Box Sync/project_canada_lynx_wgs/R_canada_lynx_wgs/LFMM (tlama@umass.edu)/WGS_locations_WGS84_lynxonly.csv", header=T, stringsAsFactors = F, sep = ",")
+sample.coord #we need to select just the lynx samples that are part of the SNP data (no bobcat yet)
+sample.coord$sample<- c("L155","LIC11","LIC20","LIC23","LIC24","LIC27B","LIC28","LIC31","LIC32","LIC36","LIC46","LIC47","LIC48","LIC54","LIC57","LIC60","LIC8","LIC9","LIT2","LIT5","LRK10","LRK11","LRK12","LRK13","LRK17","LRK22","a109","a182","A202","a33","a475","A494","a507","a697","A772","a794","A803","A818","A857","B114","B124","B13","b188","B23","b276","B554","b90","c165","c323","c548","CB15","CB42","CB7","f264","f457","FHA_024","FHA_042","FHA_043","L09_003","L09_007","L09_015")
+
+#There's an error with A803 that needs to be corrected
+sample.coord[37,]
+sample.coord[37,3]<- 50.2414428
+
+#Define the spatial projection system (WGS84)
+crs.wgs <- "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"  
+sample.coord.sp <- SpatialPointsDataFrame(sample.coord[,c('Longitude','Latitude')], proj4string=CRS(crs.wgs), data=sample.coord)
+
+#Extract the climate data for each point (projection of climate layer and coordinates must match)
+clim.points <- extract(clim.layer, spdftrans) #write to table, Enrico!! You will need this for lfmm too if you decide to run it.
+plot(clim.points)
+
+#Save climate data without sample names, latitude, longitude, or column names for LFMM
+clim.env <- clim.points[, 4:7] #which ones do we want??
+colnames(clim.env) <- NULL #"wc2.1_10m_bio_12" "wc2.1_10m_bio_13" "wc2.1_10m_bio_14" "wc2.1_10m_bio_15"
+clim.env
+write.table(clim.env, "/Users/tanyalama/Box Sync/project_canada_lynx_wgs/R_canada_lynx_wgs/LFMM (tlama@umass.edu)/climate_data/clim.env", sep="\t", quote=F, row.names=F) #even though I removed the header, LFMM continued thinking that the clim.env object was longer (length=62) than the snp object (length=61). I used nano to paste them the clim.env columns into a new object without headers. LFMM was able to use.
+
+#If that went well, you should have a clim.points table now!
+clim.points <- read.table("/project/uma_lisa_komoroske/Tanya/scripts/GDM/LFMM_subset_snpset_0.1/clim.points.current", header = T, row.names = 1)
+
+clim.points$ID<-c("L155.variant4.variant2",
+"LIC11.variant4.variant2",
+"LIC20.variant4.variant2",
+"LIC23.variant4.variant2",
+"LIC24.variant4.variant2",
+"LIC27B.variant5.variant2",
+"LIC28.variant5.variant2",
+"LIC31.variant5.variant2",
+"LIC32.variant5.variant2",
+"LIC36.variant5.variant2",
+"LIC46.variant5.variant2",
+"LIC47.variant5.variant2",
+"LIC48.variant6.variant2",
+"LIC54.variant6.variant2",
+"LIC57.variant6.variant2",
+"LIC60.variant6.variant2",
+"LIC8.variant4.variant2",
+"LIC9.variant4.variant2",
+"LIT2.variant6.variant2",
+"LIT5.variant6.variant2",
+"LRK10.variant6.variant2",
+"LRK11.variant7.variant2",
+"LRK12.variant7.variant2",
+"LRK13.variant7.variant2",
+"LRK17.variant7.variant2",
+"LRK22.variant7.variant2",
+"a109.variant.variant.variant2",
+"a182.variant.variant.variant2",
+"a202.variant.variant.variant2",
+"a33.variant.variant.variant2",
+"a475.variant.variant.variant2",
+"a494.variant.variant.variant2",
+"a507.variant.variant.variant2",
+"a697.variant","a772.variant",
+"a794.variant",
+"a803.variant",
+"a818.variant",
+"a857.variant",
+"b114.variant",
+"b124.variant2.variant.variant2",
+"b13.variant2.variant2",
+"b188.variant2.variant.variant2",
+"b23.variant2.variant.variant2",
+"b276.variant2.variant.variant2",
+"b554.variant2.variant.variant2",
+"b90.variant2.variant.variant2",
+"c165.variant2.variant.variant2",
+"c323.variant2.variant2",
+"c548.variant2.variant2",
+"cb15.variant2.variant2",
+"cb42.variant2.variant2",
+"cb7.variant2.variant2",
+"f264.variant2.variant2",
+"f457.variant3.variant2",
+"fha_024.variant3.variant2",
+"fha_042.variant3.variant2",
+"fha_043.variant3.variant2",
+"l09_003.variant3.variant2",
+"l09_007.variant3.variant2",
+"l09_015.variant3.variant2")
+```
+
+GDM is distance-based so we need to generate a genetic distance measure across individuals. We'll use Euclidian distance, but if you had populations as sample points, you could use pairwise Fst or other widely used measures in genetics. We first estimate genetic (Euclidian) distance, then rescale to values between 0 and 1, and then manipulate the output in columns with sampleIDs. 
+```{r}
+snp.dist <- dist(snp, diag = T, upper = T)  #generate Euclidean distance matrix
+snp.dist.1 <- snp.dist/(max(snp.dist))  #rescale by dividing by max value
+snp.dist.1 <- as.matrix(snp.dist.1)
+snp.dist.1 <- cbind(ID = rownames(snp.dist.1), snp.dist.1)  #make the row names an actual column named "ID"
+rownames(snp.dist.1) <- NULL  #remove prior row names
+#write.table(snp.dist.1, "/project/uma_lisa_komoroske/Tanya/scripts/GDM/LFMM_subset_snpset_0.1/snp.dist.1", sep="\t", quote=F, row.names=F)  #save a copy if you want
+snp.dist.1  #view the final distance matrix
+```
+
+#Prepare site-pair table
+Load the dependencies and format the input:
+Note: we had a hard time getting the inputs accepted because we needed the snp.dist.1[,1] "ID" field needed to also be mirrored in the clim.points table. So we added a field to clim.points.current called "ID", so that the two would match up (see above). Also, if there are any NA's in your clim.points input, gdm will accept it as input, but won't run.
+```{r}
+library(gdm)
+
+gdm.input <- formatsitepair(bioData=snp.dist.1, bioFormat=3, predData=clim.points, siteColumn="ID", XColumn="Longitude", YColumn="Latitude") 
+```
+There are a few different ways to tell GDM how you've structured your input data using formatsitepair. Ours are format 'Type 3' and our predictor data (climate data points) are in clim.points and in that object, samples are column named "ID" x is Longitude and y is Latitude. Longitude and Latitude will be used to calculate spatial distances. 
+
+Once the input is formatted, we can run GDM indicating the input (gdm.input) and that we want it to consider spatial distance (geo=T). 
+#Run GDM
+```{r}
+gdm <- gdm(gdm.input, geo = T, splines = NULL, knots = NULL)
+
+#Save our gdm model object
+save(gdm, file = "gdm_model.rda")
+#In my opinion these outputs are much easier to interpret than GF. To summarize the results and view an estimate of the deviance explained use: 
+summary.gdm(gdm)
+#Geographic Distance only accounted for some portion of 16% of deviance explained. GDM partitions variance between geographical distance and your actual GEA, which helps us interpret whether the associations we see are "real" or just an artifact of spatiotemporality. 
+
+gdm$explained #this seems low. prior models where we were more selective about bioclimatic variables were more in the 30% range
+#16.55415
+```
+#How much deviance is explained by the model? What does that mean?
+
+To better undertand the importance of each variable in the overall model, we can use the gdm.varImp function to assess variable importance. Let's try that and then plot the results.
+```{r}
+gdm.importance <- gdm.varImp(gdm.input, geo=T, splines=NULL, nPerm=50, parallel=F, cores=1)
+
+#Note that this model only explains 16.55415% of the model variance, so this barplot adds to 16.55415 (weird, but whatever). We can interpret BIO4, BIO3, BIO10 as the most important variables with our spatial distribution of samples (Geographic) accounting for some portion of variance explained, but not the leading predictor. 
+
+#pdf("GDM_VariableImportance.pdf")
+barplot(sort(gdm.importance[[2]][,1], decreasing=F), horiz=TRUE, las=1, cex.axis=0.8, cex.names=0.5, xlab="Percent Deviance Explained (sum 16.5%)")
+#dev.off()
+```
+#Similar to GF, we can get "turnover functions" showing the relationship of genetic composition with geographic and climate gradients.
+
+These are the "turnover functions" described in Fitzpatrick et al. showing how allelic composition changes along the spatial or environmental gradients. The shapes are nonlinear and large jumps show steep genetic changes along certain portions of the environmental gradient. The height that the function achieved on the right side of the plot is the total importance and should match the barplot. First, organize the variables by importance and then plot:
+```{r}
+top_variables<- c("wc2.1_10m_bio_4", "wc2.1_10m_bio_3", "wc2.1_10m_bio_10", "Geographic", "wc2.1_10m_bio_18")
+
+plot(gdm, plot.layout = c(3, 2))
+```
+What do these plots suggest? How do the variable importance and turnver functions compare to results from GF?
+
+#GDM_TurnoverFunctions_Uncertainty
+You may also wonder how conifdent we are in the modeled relationships. With gdm, we can generate confidence intervals using the plotUncertainty function:
+```{r]}
+pdf("GDM_TurnoverFunctions_Uncertainty.pdf")
+plotUncertainty(gdm.input, sampleSites=0.70, bsIters=100, geo=T, plot.layout=c(3,4)) #2 pages because there's too many
+dev.off()
+```
+Compare to the GF results. Overall, the methods appear to suggest that the same predictors are important. However, we should be careful interpreting too much due to small sample size. 
+
+#################################################
+#Running gdm on future climate data
+#1. SNP data
+Remains the same, snp from snp.forR above
+
+#2. Future climate data (2061-2080)
+```{r}
+clim.points.future <- read.csv("/project/uma_lisa_komoroske/Tanya/scripts/GDM/LFMM_subset_snpset_0.1/clim.points.future.csv", header = T, sep=",")
+rownames(clim.points.future)<- rownames(clim.points) #looks good
+
+clim.points.future$ID<-c("L155.variant4.variant2",
+"LIC11.variant4.variant2",
+"LIC20.variant4.variant2",
+"LIC23.variant4.variant2",
+"LIC24.variant4.variant2",
+"LIC27B.variant5.variant2",
+"LIC28.variant5.variant2",
+"LIC31.variant5.variant2",
+"LIC32.variant5.variant2",
+"LIC36.variant5.variant2",
+"LIC46.variant5.variant2",
+"LIC47.variant5.variant2",
+"LIC48.variant6.variant2",
+"LIC54.variant6.variant2",
+"LIC57.variant6.variant2",
+"LIC60.variant6.variant2",
+"LIC8.variant4.variant2",
+"LIC9.variant4.variant2",
+"LIT2.variant6.variant2",
+"LIT5.variant6.variant2",
+"LRK10.variant6.variant2",
+"LRK11.variant7.variant2",
+"LRK12.variant7.variant2",
+"LRK13.variant7.variant2",
+"LRK17.variant7.variant2",
+"LRK22.variant7.variant2",
+"a109.variant.variant.variant2",
+"a182.variant.variant.variant2",
+"a202.variant.variant.variant2",
+"a33.variant.variant.variant2",
+"a475.variant.variant.variant2",
+"a494.variant.variant.variant2",
+"a507.variant.variant.variant2",
+"a697.variant","a772.variant",
+"a794.variant",
+"a803.variant",
+"a818.variant",
+"a857.variant",
+"b114.variant",
+"b124.variant2.variant.variant2",
+"b13.variant2.variant2",
+"b188.variant2.variant.variant2",
+"b23.variant2.variant.variant2",
+"b276.variant2.variant.variant2",
+"b554.variant2.variant.variant2",
+"b90.variant2.variant.variant2",
+"c165.variant2.variant.variant2",
+"c323.variant2.variant2",
+"c548.variant2.variant2",
+"cb15.variant2.variant2",
+"cb42.variant2.variant2",
+"cb7.variant2.variant2",
+"f264.variant2.variant2",
+"f457.variant3.variant2",
+"fha_024.variant3.variant2",
+"fha_042.variant3.variant2",
+"fha_043.variant3.variant2",
+"l09_003.variant3.variant2",
+"l09_007.variant3.variant2",
+"l09_015.variant3.variant2")
+
+#We had to adjust the colnames and order of variables in clim.points.future because they didn't match clim.points (current). The naming and order of the future variables was slightly different. We did this in excel because I made a few errors reordering things in R the first time around (sorry). 
+```
+#3. SNP distance matrix
+snp.dist.1 remains the same
+
+#4. Prepare the gdm.input.future
+```{r}
+gdm.input.future <- formatsitepair(bioData=snp.dist.1, bioFormat=3, predData=clim.points.future, siteColumn="ID", XColumn="Longitude", YColumn="Latitude") 
+```
+#5. Predict biological distance between 1970-2000 current and 2061-2080 future
+```{r}
+gdm.future <- gdm(gdm.input.future, geo = T, splines = NULL, knots = NULL)
+
+#Save our gdm model object
+save(gdm.future, file = "gdm_model_future.rda")
+#In my opinion these outputs are much easier to interpret than GF. To summarize the results and view an estimate of the deviance explained use: 
+summary.gdm(gdm.future)
+#Geographic Distance only accounted for some portion of 17% of deviance explained. GDM partitions variance between geographical distance and your actual GEA, which helps us interpret whether the associations we see are "real" or just an artifact of spatiotemporality. 
+
+gdm.future$explained #this seems low. prior models wher
+
+gdm.importance.future <- gdm.varImp(gdm.input.future, geo=T, splines=NULL, nPerm=50, parallel=F, cores=1)
+
+#Note that this model only explains 16.55415% of the model variance, so this barplot adds to 16.55415 (weird, but whatever). We can interpret BIO4, BIO3, BIO10 as the most important variables with our spatial distribution of samples (Geographic) accounting for some portion of variance explained, but not the leading predictor. 
+
+#pdf("GDM_VariableImportance.pdf")
+barplot(sort(gdm.importance.future[[2]][,1], decreasing=T), horiz=F, las=2, cex.axis=0.8, cex.names=0.5, ylab="Percent Deviance Explained")
+
+#Plot predicted vs. observed compositional dissimilarity
+par(mfrow=c(1,1))
+plot(gdm.input.future$distance, gdm.future, xlab="Observed dissimilarity",
+ylab="Predicted dissimilarity", xlim=c(0,1), ylim=c(0,1), pch=20, col=rgb(0,0,1,0.5))
+lines(c(-1,2), c(-1,2))
+
+#What does it mean that the points are horizontal to the predicted line...
+```
+Let's use the gdm.varImp function again to assess variable importance. 
+```{r}
+gdm.importance.future <- gdm.varImp(gdm.input.future, geo=T, splines=NULL, nPerm=1, parallel=F, cores=1) #Percent explained is 17%
+
+#pdf("future_GDM_VariableImportance.pdf")
+barplot(sort(gdm.importance.future[[2]][,1], decreasing=T), horiz=F, las=2, cex.axis=0.8, cex.names=0.5, ylab="Percent Deviance Explained")
+#dev.off()
+
+#This is a different order from our gdm on current climate data..
+```
+#Similar to GF, we can get "turnover functions" showing the relationship of genetic composition with geographic and climate gradients.
+
+These are the "turnover functions" described in Fitzpatrick et al. showing how allelic composition changes along the spatial or environmental gradients. The shapes are nonlinear and large jumps show steep genetic changes along certain portions of the environmental gradient. The height that the function achieved on the right side of the plot is the total importance and should match the barplot. First, organize the variables by importance and then plot:
+```{r}
+plot(gdm.future, plot.layout = c(4, 4))
+plot(gdm, plot.layout=c(4,4)) #compare to current gdm plots
+```
+What do these plots suggest? How do the variable importance and turnver functions compare to results from GF?
+
+#GDM_TurnoverFunctions_Uncertainty
+You may also wonder how conifdent we are in the modeled relationships. With gdm, we can generate confidence intervals using the plotUncertainty function:
+```{r]}
+#pdf("GDM_TurnoverFunctions_Uncertainty.pdf")
+plotUncertainty(gdm.input.future, sampleSites=0.70, bsIters=100, geo=T, plot.layout=c(3,4)) #2 pages because there's too many
+#dev.off()
+```
+
+#1st attempt at Genetic Offset mapping with gdm. 
+Discard, we ended up using bioformat=3 using our regular gdm and didn't need this
+```{r}
+# environmental raster data
+rastFile <- dir("/project/uma_lisa_komoroske/Tanya/scripts/GDM/LFMM_subset_snpset_0.1/climate_data/current_wc2.1_10m_bio", full.names=T, pattern='.tif')  
+envRast <- stack(rastFile) 
+
+gdmTab.rast <- formatsitepair(bioData=snp.dist.1, bioFormat=3, XColumn="Long", YColumn="Lat",
+sppColumn="species", siteColumn="site", predData=envRast)
+# make sure there are no NA values
+# e.g., if some sites do not intersect the rasters
+sum(is.na(gdmTab.rast))
+## [1] 465
+gdmTab.rast <- na.omit(gdmTab.rast)
+
+species<-c("southSLR",
+"southSLR",
+"southSLR",
+"southSLR",
+"southSLR",
+"southSLR",
+"southSLR",
+"southSLR",
+"southSLR",
+"southSLR",
+"southSLR",
+"southSLR",
+"southSLR",
+"southSLR",
+"southSLR",
+"southSLR",
+"southSLR",
+"southSLR",
+"southSLR",
+"southSLR",
+"southSLR",
+"southSLR",
+"southSLR",
+"southSLR",
+"southSLR",
+"southSLR",
+"southSLR",
+"southSLR",
+"northSLR",
+"northSLR",
+"NFLD",
+"NFLD",
+"southSLR",
+"southSLR",
+"northSLR",
+"southSLR",
+"northSLR",
+"northSLR",
+"southSLR",
+"northSLR",
+"northSLR",
+"northSLR",
+"northSLR",
+"southSLR",
+"NFLD",
+"northSLR",
+"southSLR",
+"northSLR",
+"northSLR",
+"southSLR",
+"southSLR",
+"southSLR",
+"southSLR",
+"northSLR",
+"northSLR",
+"northSLR",
+"northSLR",
+"northSLR",
+"southSLR",
+"northSLR",
+"southSLR")
+sppTab<- cbind(species,sppTab)
+write.table(sppTab, "/project/uma_lisa_komoroske/Tanya/scripts/GDM/sppTab")
+```
+
+##########################################################################################
+#GDM with select bioclim variables
+I want to try gdm just with those bioclim variables which I think are most relevant to lynx (cold and precipitation associated things). We ran this, and I thought the gdm with ALL bioclim variables provided more fine-grain detail. 
+```{r}
+#select  current climate variables 
+clim.points.selection <- clim.points[,c(1,2,3,16, 18, 5,9, 13, 22)]
+
+#prepare the input
+gdm.input.selection <- formatsitepair(bioData=snp.dist.1, bioFormat=3, predData=clim.points.selection, siteColumn="ID", XColumn="Longitude", YColumn="Latitude") 
+
+#run gdm with selected climate variables
+gdm_var_selection <- gdm(gdm.input.selection, geo = T, splines = NULL, knots = NULL)
+
+#save gdm model for mapping (local)
+save(gdm_var_selection, file = "gdm_variable_selection_model.rda")
+
+#predict.gdm on this model with future climate rasters to estimate genetic offset (local)
+
+#load our model from R
+load("/Users/tanyalama/Box/project_canada_lynx_wgs/R_canada_lynx_wgs/gdm/gdm_variable_selection_model.rda")
+
+#prepare raster for current climate, with selected bioclimatic variables (1,4,6,11,15,19)
+clim.layer.selection<- stack(clim.list.current[[1]],clim.list.current[[14]], clim.list.current[[16]],clim.list.current[[3]], clim.list.current[[7]],clim.list.current[[11]])
+#crop
+clim.layer.crop.selection <- crop(clim.layer.selection, extent)
+#plot
+plot(clim.layer.crop.selection) #looks good
+
+#prepare raster for future climate
+climcropfut.selection<- stack(climcropfut[[1]],climcropfut[[14]], climcropfut[[16]],climcropfut[[3]], climcropfut[[7]],climcropfut[[11]])
+#crop
+climcropfut.selection.crop <- crop(climcropfut.selection, extent)
+#plot
+plot(climcropfut.selection.crop)
+
+#genetic offset bewteen current and future, using selected bioclim variables
+pred.selection <- predict.gdm(gdm_var_selection, clim.layer.crop.selection, time=T, predRasts = climcropfut.selection.crop) # offset
+
+#plot genetic off set
+pal <- colorRampPalette(c("white", "yellow","orange", "red", "firebrick", "maroon"))
+
+plot(pred.selection, col = pal(50))
+
+#Mask and crop our genetic offset raster layer using the species distribution 
+sppdist  <- readOGR('/Users/tanyalama/Box/project_canada_lynx_wgs/R_canada_lynx_wgs/study_area_map/redlist_species_data_9e1bb103-c4ae-4c7e-8753-13cf4e989315/data_0.shp')
+
+plot(pred.selection, col = pal(50))
+plot(sppdist, add=TRUE)
+
+masked <- mask(x = pred.selection, mask = sppdist, col = pal(50))
+plot(masked, col = pal(50))
+
+cropped <- crop(x = masked, y = extent(sppdist))
+
+par(bty = 'n') xaxt = "n", yaxt = "n" #remove box and axes if you want
+par()
+plot(cropped, col = pal(50))
+
+#add geographic borders and spp dist border
+plot(can1[can1$NAME_1 %in% theseJurisdictions, ], border="black", cex=0.2,
+    col=NA, add=TRUE) +
+plot(us1[us1$NAME_1 %in% theseUSJurisdictions, ], border="black", cex=0.2,
+    col=NA , add=TRUE) 
+plot(sppdist, col=NA, border="black", cex=0.1, add=TRUE)
